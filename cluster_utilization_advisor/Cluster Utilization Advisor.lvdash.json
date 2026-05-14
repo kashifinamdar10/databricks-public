@@ -1,0 +1,1321 @@
+{
+  "datasets": [
+    {
+      "name": "per_cluster",
+      "displayName": "Per-cluster utilization",
+      "queryLines": [
+        "SELECT * FROM mohdkashif_inamdar.cluster_utilization_advisor.per_cluster_utilization"
+      ]
+    },
+    {
+      "name": "hourly",
+      "displayName": "Hourly utilization (drill-down)",
+      "queryLines": [
+        "SELECT * FROM mohdkashif_inamdar.cluster_utilization_advisor.hourly_cluster_utilization"
+      ]
+    },
+    {
+      "name": "per_job",
+      "displayName": "Per-job utilization",
+      "queryLines": [
+        "SELECT * FROM mohdkashif_inamdar.cluster_utilization_advisor.per_job_utilization"
+      ]
+    },
+    {
+      "name": "kpi_under",
+      "displayName": "Under-utilized",
+      "queryLines": [
+        "SELECT COUNT(*) AS n FROM mohdkashif_inamdar.cluster_utilization_advisor.per_cluster_utilization WHERE utilization_verdict = 'UNDER_UTILIZED'"
+      ]
+    },
+    {
+      "name": "kpi_over",
+      "displayName": "Over-utilized",
+      "queryLines": [
+        "SELECT COUNT(*) AS n FROM mohdkashif_inamdar.cluster_utilization_advisor.per_cluster_utilization WHERE utilization_verdict = 'OVER_UTILIZED'"
+      ]
+    },
+    {
+      "name": "kpi_right",
+      "displayName": "Right-sized",
+      "queryLines": [
+        "SELECT COUNT(*) AS n FROM mohdkashif_inamdar.cluster_utilization_advisor.per_cluster_utilization WHERE utilization_verdict = 'RIGHT_SIZED'"
+      ]
+    },
+    {
+      "name": "kpi_waste",
+      "displayName": "Estimated waste ($)",
+      "queryLines": [
+        "SELECT ROUND(SUM(estimated_waste_usd), 2) AS n FROM mohdkashif_inamdar.cluster_utilization_advisor.per_cluster_utilization"
+      ]
+    },
+    {
+      "name": "kpi_cost",
+      "displayName": "Total list cost ($)",
+      "queryLines": [
+        "SELECT ROUND(SUM(list_cost_usd), 2) AS n FROM mohdkashif_inamdar.cluster_utilization_advisor.per_cluster_utilization"
+      ]
+    },
+    {
+      "name": "top_underutilized",
+      "displayName": "Top under-utilized clusters by waste",
+      "queryLines": [
+        "SELECT cluster_name, cluster_source, worker_node_type, worker_count,\n",
+        "              avg_cpu_busy_pct, p95_cpu_busy_pct, avg_mem_used_pct, p95_mem_used_pct,\n",
+        "              list_cost_usd, estimated_waste_usd, recommendation, cluster_id\n",
+        "       FROM mohdkashif_inamdar.cluster_utilization_advisor.per_cluster_utilization\n",
+        "       WHERE utilization_verdict = 'UNDER_UTILIZED'\n",
+        "       ORDER BY estimated_waste_usd DESC\n",
+        "       LIMIT 25"
+      ]
+    },
+    {
+      "name": "top_overutilized",
+      "displayName": "Over-utilized clusters",
+      "queryLines": [
+        "SELECT cluster_name, cluster_source, worker_node_type, worker_count,\n",
+        "              p95_cpu_busy_pct, p95_mem_used_pct, max_mem_swap_pct,\n",
+        "              list_cost_usd, recommendation, cluster_id\n",
+        "       FROM mohdkashif_inamdar.cluster_utilization_advisor.per_cluster_utilization\n",
+        "       WHERE utilization_verdict = 'OVER_UTILIZED'\n",
+        "       ORDER BY list_cost_usd DESC\n",
+        "       LIMIT 25"
+      ]
+    },
+    {
+      "name": "rightsizing",
+      "displayName": "Right-sizing details",
+      "queryLines": [
+        "SELECT * FROM mohdkashif_inamdar.cluster_utilization_advisor.cluster_rightsizing_details WHERE utilization_verdict IN ('UNDER_UTILIZED', 'OVER_UTILIZED', 'REVIEW') ORDER BY COALESCE(estimated_waste_usd, 0) DESC, list_cost_usd DESC LIMIT 500"
+      ],
+      "columns": [
+        {
+          "displayName": "Action Category",
+          "expression": "CASE WHEN `recommended_action` LIKE '%Mostly idle%' THEN 'Consider Serverless / Shut down' WHEN `recommended_action` LIKE '%Memory-bound%' THEN 'Memory optimization needed' WHEN `recommended_action` LIKE '%CPU-bound%' THEN 'CPU optimization needed' WHEN `recommended_action` LIKE '%Reduce max_autoscale_workers%' THEN 'Reduce autoscale workers' WHEN `recommended_action` LIKE '%reduce max workers%' THEN 'Reduce max workers' WHEN `recommended_action` LIKE '%Reduce worker count%' THEN 'Reduce worker count' ELSE 'Other' END"
+        }
+      ]
+    },
+    {
+      "name": "jobs_top",
+      "displayName": "Top jobs by cost",
+      "queryLines": [
+        "SELECT job_name, job_id, cluster_id, dbus, list_cost_usd,\n",
+        "              utilization_verdict, avg_cpu_busy_pct, p95_cpu_busy_pct,\n",
+        "              avg_mem_used_pct, recommendation\n",
+        "       FROM mohdkashif_inamdar.cluster_utilization_advisor.per_job_utilization\n",
+        "       ORDER BY list_cost_usd DESC\n",
+        "       LIMIT 100"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "47fde441",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "d7919cac",
+            "queries": [
+              {
+                "name": "filter_d7919cac_workspace_id",
+                "query": {
+                  "datasetName": "per_cluster",
+                  "fields": [
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "workspace_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "workspace_id",
+                    "displayName": "workspace_id",
+                    "queryName": "filter_d7919cac_workspace_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Workspace"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "401ec5d4",
+            "queries": [
+              {
+                "name": "filter_401ec5d4_cluster_source",
+                "query": {
+                  "datasetName": "per_cluster",
+                  "fields": [
+                    {
+                      "name": "cluster_source",
+                      "expression": "`cluster_source`"
+                    },
+                    {
+                      "name": "cluster_source_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "cluster_source",
+                    "displayName": "cluster_source",
+                    "queryName": "filter_401ec5d4_cluster_source"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cluster source"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "b7fb86d4",
+            "queries": [
+              {
+                "name": "filter_b7fb86d4_utilization_verdict",
+                "query": {
+                  "datasetName": "per_cluster",
+                  "fields": [
+                    {
+                      "name": "utilization_verdict",
+                      "expression": "`utilization_verdict`"
+                    },
+                    {
+                      "name": "utilization_verdict_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "utilization_verdict",
+                    "displayName": "utilization_verdict",
+                    "queryName": "filter_b7fb86d4_utilization_verdict"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Verdict"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "099d6993",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "per_cluster",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(*)",
+                  "displayName": "Clusters analyzed"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clusters analyzed"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "6043940d",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_under",
+                  "fields": [
+                    {
+                      "name": "sum(n)",
+                      "expression": "SUM(`n`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(n)",
+                  "displayName": "Under-utilized"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Under-utilized"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "7cebb535",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_over",
+                  "fields": [
+                    {
+                      "name": "sum(n)",
+                      "expression": "SUM(`n`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(n)",
+                  "displayName": "Over-utilized"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Over-utilized"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "8b617a9b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_right",
+                  "fields": [
+                    {
+                      "name": "sum(n)",
+                      "expression": "SUM(`n`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(n)",
+                  "displayName": "Right-sized"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Right-sized"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "3d3a3435",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_waste",
+                  "fields": [
+                    {
+                      "name": "sum(n)",
+                      "expression": "SUM(`n`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(n)",
+                  "displayName": "Estimated waste ($)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Estimated waste ($)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "9b92bdbc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi_cost",
+                  "fields": [
+                    {
+                      "name": "sum(n)",
+                      "expression": "SUM(`n`)"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(n)",
+                  "displayName": "Total list cost ($)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total list cost ($)"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 1,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "ac0cf8d7",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "per_cluster",
+                  "fields": [
+                    {
+                      "name": "utilization_verdict",
+                      "expression": "`utilization_verdict`"
+                    },
+                    {
+                      "name": "count(cluster_id)",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "utilization_verdict",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "utilization_verdict"
+                },
+                "y": {
+                  "fieldName": "count(cluster_id)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "COUNT of cluster_id"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clusters by verdict"
+              },
+              "mark": {
+                "colors": [
+                  "#FF3621",
+                  "#FFAB00",
+                  "#00A972",
+                  "#919191"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "6d987590",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "per_cluster",
+                  "fields": [
+                    {
+                      "name": "avg_cpu_busy_pct",
+                      "expression": "`avg_cpu_busy_pct`"
+                    },
+                    {
+                      "name": "list_cost_usd",
+                      "expression": "`list_cost_usd`"
+                    },
+                    {
+                      "name": "utilization_verdict",
+                      "expression": "`utilization_verdict`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "scatter",
+              "encodings": {
+                "x": {
+                  "fieldName": "avg_cpu_busy_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "avg_cpu_busy_pct"
+                },
+                "y": {
+                  "fieldName": "list_cost_usd",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "list_cost_usd"
+                },
+                "color": {
+                  "fieldName": "utilization_verdict",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "utilization_verdict"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cost vs avg CPU utilization (by verdict)"
+              },
+              "mark": {
+                "colors": [
+                  "#FF3621",
+                  "#FFAB00",
+                  "#00A972",
+                  "#919191"
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 3,
+            "width": 3,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "4fced8e0",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "top_underutilized",
+                  "fields": [
+                    {
+                      "name": "cluster_name",
+                      "expression": "`cluster_name`"
+                    },
+                    {
+                      "name": "estimated_waste_usd",
+                      "expression": "`estimated_waste_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Top under-utilized clusters by estimated waste"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "cluster_name",
+                  "displayName": "Cluster",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "estimated_waste_usd",
+                  "displayName": "Estimated Waste ($)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "9ff2969f",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "per_cluster",
+                  "fields": [
+                    {
+                      "name": "cluster_source",
+                      "expression": "`cluster_source`"
+                    },
+                    {
+                      "name": "sum(list_cost_usd)",
+                      "expression": "SUM(`list_cost_usd`)"
+                    },
+                    {
+                      "name": "sum(estimated_waste_usd)",
+                      "expression": "SUM(`estimated_waste_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Cost breakdown by cluster source"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "cluster_source",
+                  "displayName": "Cluster Source",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  }
+                },
+                "y": {
+                  "fields": [
+                    {
+                      "fieldName": "sum(list_cost_usd)",
+                      "displayName": "List Cost ($)"
+                    },
+                    {
+                      "fieldName": "sum(estimated_waste_usd)",
+                      "displayName": "Estimated Waste ($)"
+                    }
+                  ],
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "f4128a93",
+      "displayName": "Right-sizing details",
+      "layout": [
+        {
+          "widget": {
+            "name": "43f6a296",
+            "queries": [
+              {
+                "name": "filter_43f6a296_workspace_id",
+                "query": {
+                  "datasetName": "rightsizing",
+                  "fields": [
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "workspace_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "workspace_id",
+                    "displayName": "workspace_id",
+                    "queryName": "filter_43f6a296_workspace_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Workspace"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "b46f1678",
+            "queries": [
+              {
+                "name": "filter_b46f1678_utilization_verdict",
+                "query": {
+                  "datasetName": "rightsizing",
+                  "fields": [
+                    {
+                      "name": "utilization_verdict",
+                      "expression": "`utilization_verdict`"
+                    },
+                    {
+                      "name": "utilization_verdict_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "utilization_verdict",
+                    "displayName": "utilization_verdict",
+                    "queryName": "filter_b46f1678_utilization_verdict"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Verdict"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "25429a3e",
+            "queries": [
+              {
+                "name": "filter_25429a3e_cluster_source",
+                "query": {
+                  "datasetName": "rightsizing",
+                  "fields": [
+                    {
+                      "name": "cluster_source",
+                      "expression": "`cluster_source`"
+                    },
+                    {
+                      "name": "cluster_source_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "cluster_source",
+                    "displayName": "cluster_source",
+                    "queryName": "filter_25429a3e_cluster_source"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cluster source"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "80fd1e90",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "rightsizing",
+                  "fields": [
+                    {
+                      "name": "cluster_name",
+                      "expression": "`cluster_name`"
+                    },
+                    {
+                      "name": "cluster_source",
+                      "expression": "`cluster_source`"
+                    },
+                    {
+                      "name": "utilization_verdict",
+                      "expression": "`utilization_verdict`"
+                    },
+                    {
+                      "name": "current_worker_type",
+                      "expression": "`current_worker_type`"
+                    },
+                    {
+                      "name": "current_worker_count",
+                      "expression": "`current_worker_count`"
+                    },
+                    {
+                      "name": "avg_cpu_busy_pct",
+                      "expression": "`avg_cpu_busy_pct`"
+                    },
+                    {
+                      "name": "avg_mem_used_pct",
+                      "expression": "`avg_mem_used_pct`"
+                    },
+                    {
+                      "name": "list_cost_usd",
+                      "expression": "`list_cost_usd`"
+                    },
+                    {
+                      "name": "estimated_waste_usd",
+                      "expression": "`estimated_waste_usd`"
+                    },
+                    {
+                      "name": "reasons",
+                      "expression": "`reasons`"
+                    },
+                    {
+                      "name": "recommended_action",
+                      "expression": "`recommended_action`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Cluster details & recommendations"
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "cluster_name",
+                    "displayName": "Cluster Name"
+                  },
+                  {
+                    "fieldName": "cluster_source",
+                    "displayName": "Source"
+                  },
+                  {
+                    "fieldName": "utilization_verdict",
+                    "displayName": "Verdict"
+                  },
+                  {
+                    "fieldName": "current_worker_type",
+                    "displayName": "Worker Type"
+                  },
+                  {
+                    "fieldName": "current_worker_count",
+                    "displayName": "Workers"
+                  },
+                  {
+                    "fieldName": "avg_cpu_busy_pct",
+                    "displayName": "Avg CPU %"
+                  },
+                  {
+                    "fieldName": "avg_mem_used_pct",
+                    "displayName": "Avg Mem %"
+                  },
+                  {
+                    "fieldName": "list_cost_usd",
+                    "displayName": "List Cost ($)"
+                  },
+                  {
+                    "fieldName": "estimated_waste_usd",
+                    "displayName": "Est. Waste ($)"
+                  },
+                  {
+                    "fieldName": "reasons",
+                    "displayName": "Reason"
+                  },
+                  {
+                    "fieldName": "recommended_action",
+                    "displayName": "Recommendation"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "8725d495",
+      "displayName": "Jobs",
+      "layout": [
+        {
+          "widget": {
+            "name": "9f6d3f1b",
+            "queries": [
+              {
+                "name": "filter_9f6d3f1b_workspace_id",
+                "query": {
+                  "datasetName": "per_job",
+                  "fields": [
+                    {
+                      "name": "workspace_id",
+                      "expression": "`workspace_id`"
+                    },
+                    {
+                      "name": "workspace_id_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "workspace_id",
+                    "displayName": "workspace_id",
+                    "queryName": "filter_9f6d3f1b_workspace_id"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Workspace"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "e42344aa",
+            "queries": [
+              {
+                "name": "filter_e42344aa_utilization_verdict",
+                "query": {
+                  "datasetName": "per_job",
+                  "fields": [
+                    {
+                      "name": "utilization_verdict",
+                      "expression": "`utilization_verdict`"
+                    },
+                    {
+                      "name": "utilization_verdict_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "utilization_verdict",
+                    "displayName": "utilization_verdict",
+                    "queryName": "filter_e42344aa_utilization_verdict"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Verdict"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "0f506d4c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "jobs_top",
+                  "fields": [
+                    {
+                      "name": "job_name",
+                      "expression": "`job_name`"
+                    },
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "cluster_id",
+                      "expression": "`cluster_id`"
+                    },
+                    {
+                      "name": "dbus",
+                      "expression": "`dbus`"
+                    },
+                    {
+                      "name": "list_cost_usd",
+                      "expression": "`list_cost_usd`"
+                    },
+                    {
+                      "name": "utilization_verdict",
+                      "expression": "`utilization_verdict`"
+                    },
+                    {
+                      "name": "avg_cpu_busy_pct",
+                      "expression": "`avg_cpu_busy_pct`"
+                    },
+                    {
+                      "name": "p95_cpu_busy_pct",
+                      "expression": "`p95_cpu_busy_pct`"
+                    },
+                    {
+                      "name": "avg_mem_used_pct",
+                      "expression": "`avg_mem_used_pct`"
+                    },
+                    {
+                      "name": "recommendation",
+                      "expression": "`recommendation`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "job_name",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Job",
+                    "displayName": "Job",
+                    "order": 100000,
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "job_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Job ID",
+                    "displayName": "Job ID",
+                    "order": 100001,
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "cluster_id",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Cluster ID",
+                    "displayName": "Cluster ID",
+                    "order": 100002,
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "dbus",
+                    "type": "float",
+                    "displayAs": "number",
+                    "title": "DBUs",
+                    "displayName": "DBUs",
+                    "order": 100003,
+                    "alignContent": "right",
+                    "numberFormat": "#,##0.00"
+                  },
+                  {
+                    "fieldName": "list_cost_usd",
+                    "type": "float",
+                    "displayAs": "number",
+                    "title": "List cost ($)",
+                    "displayName": "List cost ($)",
+                    "order": 100004,
+                    "alignContent": "right",
+                    "numberFormat": "$#,##0.00"
+                  },
+                  {
+                    "fieldName": "utilization_verdict",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Verdict",
+                    "displayName": "Verdict",
+                    "order": 100005,
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "avg_cpu_busy_pct",
+                    "type": "float",
+                    "displayAs": "number",
+                    "title": "Avg CPU %",
+                    "displayName": "Avg CPU %",
+                    "order": 100006,
+                    "alignContent": "right",
+                    "numberFormat": "0.0"
+                  },
+                  {
+                    "fieldName": "p95_cpu_busy_pct",
+                    "type": "float",
+                    "displayAs": "number",
+                    "title": "p95 CPU %",
+                    "displayName": "p95 CPU %",
+                    "order": 100007,
+                    "alignContent": "right",
+                    "numberFormat": "0.0"
+                  },
+                  {
+                    "fieldName": "avg_mem_used_pct",
+                    "type": "float",
+                    "displayAs": "number",
+                    "title": "Avg mem %",
+                    "displayName": "Avg mem %",
+                    "order": 100008,
+                    "alignContent": "right",
+                    "numberFormat": "0.0"
+                  },
+                  {
+                    "fieldName": "recommendation",
+                    "type": "string",
+                    "displayAs": "string",
+                    "title": "Recommendation",
+                    "displayName": "Recommendation",
+                    "order": 100009,
+                    "alignContent": "left"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top jobs by spend with utilization verdict"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 6,
+            "height": 12
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
