@@ -1,0 +1,1371 @@
+{
+  "datasets": [
+    {
+      "name": "ds_cluster_assessment",
+      "displayName": "Cluster Assessment",
+      "queryLines": [
+        "WITH cluster_base AS (\n",
+        "  SELECT\n",
+        "    * EXCEPT (rn)\n",
+        "  FROM\n",
+        "    (\n",
+        "      SELECT\n",
+        "        c.workspace_id,\n",
+        "        c.cluster_id,\n",
+        "        c.cluster_name,\n",
+        "        c.owned_by,\n",
+        "        c.create_time,\n",
+        "        c.delete_time,\n",
+        "        c.driver_node_type,\n",
+        "        c.worker_node_type,\n",
+        "        c.worker_count,\n",
+        "        c.min_autoscale_workers,\n",
+        "        c.max_autoscale_workers,\n",
+        "        c.auto_termination_minutes,\n",
+        "        c.enable_elastic_disk,\n",
+        "        c.tags,\n",
+        "        c.cluster_source,\n",
+        "        c.dbr_version,\n",
+        "        c.data_security_mode,\n",
+        "        c.policy_id,\n",
+        "        c.change_time,\n",
+        "        ROW_NUMBER() OVER (PARTITION BY c.cluster_id ORDER BY c.change_time DESC) AS rn\n",
+        "      FROM\n",
+        "        system.compute.clusters c\n",
+        "      WHERE\n",
+        "        c.cluster_source IN ('UI', 'API')\n",
+        "        AND (\n",
+        "          c.delete_time IS NULL\n",
+        "          OR c.delete_time >= DATEADD(DAY, -:days_back, CURRENT_TIMESTAMP())\n",
+        "        )\n",
+        "    )\n",
+        "  WHERE\n",
+        "    rn = 1\n",
+        "),\n",
+        "utilization_raw AS (\n",
+        "  SELECT\n",
+        "    nt.workspace_id,\n",
+        "    nt.cluster_id,\n",
+        "    nt.instance_id,\n",
+        "    nt.start_time,\n",
+        "    nt.end_time,\n",
+        "    nt.driver,\n",
+        "    nt.cpu_user_percent,\n",
+        "    nt.cpu_system_percent,\n",
+        "    nt.mem_used_percent,\n",
+        "    nt.mem_swap_percent,\n",
+        "    COALESCE(nt.cpu_user_percent, 0) + COALESCE(nt.cpu_system_percent, 0) AS cpu_active_percent\n",
+        "  FROM\n",
+        "    system.compute.node_timeline nt\n",
+        "  WHERE\n",
+        "    nt.start_time >= DATEADD(DAY, -:days_back, CURRENT_TIMESTAMP())\n",
+        "    AND nt.cluster_id IN (\n",
+        "      SELECT\n",
+        "        cluster_id\n",
+        "      FROM\n",
+        "        cluster_base\n",
+        "    )\n",
+        "),\n",
+        "per_cluster AS (\n",
+        "  SELECT\n",
+        "    cluster_id,\n",
+        "    COUNT(DISTINCT DATE_TRUNC('MINUTE', start_time)) AS active_minutes,\n",
+        "    COUNT(DISTINCT DATE_TRUNC('DAY', start_time)) AS active_days,\n",
+        "    AVG(cpu_active_percent) AS avg_cpu_percent,\n",
+        "    PERCENTILE_APPROX(cpu_active_percent, 0.50) AS p50_cpu_percent,\n",
+        "    PERCENTILE_APPROX(cpu_active_percent, 0.95) AS p95_cpu_percent,\n",
+        "    MAX(cpu_active_percent) AS max_cpu_percent,\n",
+        "    AVG(mem_used_percent) AS avg_mem_percent,\n",
+        "    PERCENTILE_APPROX(mem_used_percent, 0.95) AS p95_mem_percent,\n",
+        "    MAX(mem_used_percent) AS max_mem_percent,\n",
+        "    AVG(mem_swap_percent) AS avg_swap_percent,\n",
+        "    SUM(\n",
+        "      CASE\n",
+        "        WHEN cpu_active_percent < 10 THEN 1\n",
+        "        ELSE 0\n",
+        "      END\n",
+        "    ) AS idle_minute_samples,\n",
+        "    COUNT(*) AS total_minute_samples\n",
+        "  FROM\n",
+        "    utilization_raw\n",
+        "  GROUP BY\n",
+        "    cluster_id\n",
+        "),\n",
+        "scaling AS (\n",
+        "  SELECT\n",
+        "    cluster_id,\n",
+        "    DATE_TRUNC('MINUTE', start_time) AS minute_bucket,\n",
+        "    SUM(\n",
+        "      CASE\n",
+        "        WHEN driver = false THEN 1\n",
+        "        ELSE 0\n",
+        "      END\n",
+        "    ) AS workers_active\n",
+        "  FROM\n",
+        "    utilization_raw\n",
+        "  GROUP BY\n",
+        "    cluster_id,\n",
+        "    DATE_TRUNC('MINUTE', start_time)\n",
+        "),\n",
+        "scaling_agg AS (\n",
+        "  SELECT\n",
+        "    cluster_id,\n",
+        "    AVG(workers_active) AS avg_active_workers,\n",
+        "    MIN(workers_active) AS min_active_workers,\n",
+        "    MAX(workers_active) AS max_active_workers,\n",
+        "    PERCENTILE_APPROX(workers_active, 0.95) AS p95_active_workers,\n",
+        "    COUNT(DISTINCT workers_active) AS distinct_worker_counts\n",
+        "  FROM\n",
+        "    scaling\n",
+        "  GROUP BY\n",
+        "    cluster_id\n",
+        "),\n",
+        "cluster_cost AS (\n",
+        "  SELECT\n",
+        "    u.usage_metadata.cluster_id AS cluster_id,\n",
+        "    SUM(u.usage_quantity) AS total_dbus,\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.default, 0)) AS estimated_cost_usd,\n",
+        "    COUNT(DISTINCT u.usage_date) AS billed_days\n",
+        "  FROM\n",
+        "    system.billing.usage u\n",
+        "      LEFT JOIN system.billing.list_prices lp\n",
+        "        ON u.sku_name = lp.sku_name\n",
+        "        AND u.usage_unit = lp.usage_unit\n",
+        "        AND u.usage_end_time BETWEEN\n",
+        "          lp.price_start_time\n",
+        "        AND\n",
+        "          COALESCE(lp.price_end_time, CURRENT_TIMESTAMP())\n",
+        "  WHERE\n",
+        "    u.usage_metadata.cluster_id IS NOT NULL\n",
+        "    AND u.usage_date >= DATEADD(DAY, -:days_back, CURRENT_DATE())\n",
+        "  GROUP BY\n",
+        "    u.usage_metadata.cluster_id\n",
+        "),\n",
+        "joined AS (\n",
+        "  SELECT\n",
+        "    b.*,\n",
+        "    p.active_minutes,\n",
+        "    p.active_days,\n",
+        "    ROUND(p.avg_cpu_percent, 2) AS avg_cpu_percent,\n",
+        "    ROUND(p.p50_cpu_percent, 2) AS p50_cpu_percent,\n",
+        "    ROUND(p.p95_cpu_percent, 2) AS p95_cpu_percent,\n",
+        "    ROUND(p.max_cpu_percent, 2) AS max_cpu_percent,\n",
+        "    ROUND(p.avg_mem_percent, 2) AS avg_mem_percent,\n",
+        "    ROUND(p.p95_mem_percent, 2) AS p95_mem_percent,\n",
+        "    ROUND(p.max_mem_percent, 2) AS max_mem_percent,\n",
+        "    ROUND(p.avg_swap_percent, 2) AS avg_swap_percent,\n",
+        "    ROUND(100.0 * p.idle_minute_samples / NULLIF(p.total_minute_samples, 0), 2) AS idle_percent,\n",
+        "    s.avg_active_workers,\n",
+        "    s.min_active_workers,\n",
+        "    s.max_active_workers,\n",
+        "    s.p95_active_workers,\n",
+        "    s.distinct_worker_counts,\n",
+        "    c.total_dbus,\n",
+        "    c.estimated_cost_usd,\n",
+        "    CASE\n",
+        "      WHEN b.max_autoscale_workers IS NOT NULL THEN TRUE\n",
+        "      ELSE FALSE\n",
+        "    END AS autoscale_enabled\n",
+        "  FROM\n",
+        "    cluster_base b\n",
+        "      LEFT JOIN per_cluster p USING (cluster_id)\n",
+        "      LEFT JOIN scaling_agg s USING (cluster_id)\n",
+        "      LEFT JOIN cluster_cost c USING (cluster_id)\n",
+        "),\n",
+        "flagged AS (\n",
+        "  SELECT\n",
+        "    j.*,\n",
+        "    (p95_cpu_percent >= 85) AS flag_cpu_pressure,\n",
+        "    (p95_mem_percent >= 90) AS flag_mem_pressure,\n",
+        "    (avg_swap_percent > 5) AS flag_swap_pressure,\n",
+        "    (\n",
+        "      autoscale_enabled\n",
+        "      AND p95_active_workers >= max_autoscale_workers\n",
+        "      AND max_autoscale_workers > min_autoscale_workers\n",
+        "    ) AS flag_autoscale_pinned,\n",
+        "    (\n",
+        "      avg_cpu_percent < 20\n",
+        "      AND p95_cpu_percent < 40\n",
+        "      AND p95_mem_percent < 50\n",
+        "    ) AS flag_low_util,\n",
+        "    (idle_percent > 60) AS flag_high_idle,\n",
+        "    (\n",
+        "      auto_termination_minutes IS NULL\n",
+        "      OR auto_termination_minutes >= 120\n",
+        "    ) AS flag_loose_termination,\n",
+        "    (\n",
+        "      autoscale_enabled\n",
+        "      AND p95_active_workers <= min_autoscale_workers\n",
+        "      AND min_autoscale_workers < max_autoscale_workers\n",
+        "      AND avg_cpu_percent < 30\n",
+        "    ) AS flag_autoscale_floor_only,\n",
+        "    (\n",
+        "      active_minutes IS NULL\n",
+        "      OR active_minutes < 60\n",
+        "    ) AS flag_essentially_unused,\n",
+        "    (\n",
+        "      NOT autoscale_enabled\n",
+        "      AND worker_count IS NOT NULL\n",
+        "      AND worker_count >= 4\n",
+        "      AND avg_cpu_percent < 25\n",
+        "    ) AS flag_fixed_oversized\n",
+        "  FROM\n",
+        "    joined j\n",
+        "),\n",
+        "categorized AS (\n",
+        "  SELECT\n",
+        "    f.*,\n",
+        "    CASE\n",
+        "      WHEN flag_essentially_unused THEN 'IDLE_OR_UNUSED'\n",
+        "      WHEN\n",
+        "        flag_cpu_pressure\n",
+        "        OR flag_mem_pressure\n",
+        "        OR flag_swap_pressure\n",
+        "        OR flag_autoscale_pinned\n",
+        "      THEN\n",
+        "        'OVER_UTILIZED'\n",
+        "      WHEN\n",
+        "        flag_low_util\n",
+        "        OR flag_fixed_oversized\n",
+        "        OR (\n",
+        "          flag_high_idle\n",
+        "          AND flag_loose_termination\n",
+        "        )\n",
+        "        OR flag_autoscale_floor_only\n",
+        "      THEN\n",
+        "        'UNDER_UTILIZED'\n",
+        "      ELSE 'RIGHT_SIZED'\n",
+        "    END AS utilization_category\n",
+        "  FROM\n",
+        "    flagged f\n",
+        ")\n",
+        "SELECT\n",
+        "  c.*,\n",
+        "  CONCAT_WS(\n",
+        "    ' | ',\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        flag_cpu_pressure\n",
+        "      THEN\n",
+        "        CONCAT('CPU p95 ', CAST(p95_cpu_percent AS STRING), '% >= 85% (sustained CPU pressure)')\n",
+        "    END,\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        flag_mem_pressure\n",
+        "      THEN\n",
+        "        CONCAT('Memory p95 ', CAST(p95_mem_percent AS STRING), '% >= 90% (memory pressure)')\n",
+        "    END,\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        flag_swap_pressure\n",
+        "      THEN\n",
+        "        CONCAT('Avg swap ', CAST(avg_swap_percent AS STRING), '% > 5% (memory thrashing)')\n",
+        "    END,\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        flag_autoscale_pinned\n",
+        "      THEN\n",
+        "        CONCAT(\n",
+        "          'Autoscale pinned at max (',\n",
+        "          CAST(max_autoscale_workers AS STRING),\n",
+        "          ' workers) at p95'\n",
+        "        )\n",
+        "    END,\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        flag_low_util\n",
+        "      THEN\n",
+        "        CONCAT(\n",
+        "          'Low utilization: avg CPU ',\n",
+        "          CAST(avg_cpu_percent AS STRING),\n",
+        "          '%, p95 CPU ',\n",
+        "          CAST(p95_cpu_percent AS STRING),\n",
+        "          '%, p95 mem ',\n",
+        "          CAST(p95_mem_percent AS STRING),\n",
+        "          '%'\n",
+        "        )\n",
+        "    END,\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        flag_high_idle\n",
+        "        AND flag_loose_termination\n",
+        "      THEN\n",
+        "        CONCAT(\n",
+        "          'Idle ',\n",
+        "          CAST(idle_percent AS STRING),\n",
+        "          '% of runtime with auto-termination = ',\n",
+        "          COALESCE(CAST(auto_termination_minutes AS STRING), 'DISABLED'),\n",
+        "          ' min'\n",
+        "        )\n",
+        "    END,\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        flag_autoscale_floor_only\n",
+        "      THEN\n",
+        "        CONCAT(\n",
+        "          'Autoscale never exceeded floor (',\n",
+        "          CAST(min_autoscale_workers AS STRING),\n",
+        "          ' workers); ceiling of ',\n",
+        "          CAST(max_autoscale_workers AS STRING),\n",
+        "          ' unused'\n",
+        "        )\n",
+        "    END,\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        flag_fixed_oversized\n",
+        "      THEN\n",
+        "        CONCAT(\n",
+        "          'Fixed-size cluster with ',\n",
+        "          CAST(worker_count AS STRING),\n",
+        "          ' workers but avg CPU only ',\n",
+        "          CAST(avg_cpu_percent AS STRING),\n",
+        "          '%'\n",
+        "        )\n",
+        "    END,\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        flag_essentially_unused\n",
+        "      THEN\n",
+        "        CONCAT(\n",
+        "          'Cluster ran <60 minutes total in window (',\n",
+        "          COALESCE(CAST(active_minutes AS STRING), '0'),\n",
+        "          ' min) - likely abandoned'\n",
+        "        )\n",
+        "    END\n",
+        "  ) AS reason,\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      flag_essentially_unused\n",
+        "    THEN\n",
+        "      'DELETE: cluster has been essentially unused. If retained for ad-hoc use, set auto-termination to 30 minutes or less.'\n",
+        "    WHEN\n",
+        "      flag_autoscale_pinned\n",
+        "      AND flag_cpu_pressure\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        'SCALE UP: raise max_autoscale_workers above ',\n",
+        "        CAST(max_autoscale_workers AS STRING),\n",
+        "        ' AND consider a larger worker node type (CPU p95=',\n",
+        "        CAST(p95_cpu_percent AS STRING),\n",
+        "        '%).'\n",
+        "      )\n",
+        "    WHEN\n",
+        "      flag_autoscale_pinned\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        'RAISE CEILING: increase max_autoscale_workers from ',\n",
+        "        CAST(max_autoscale_workers AS STRING),\n",
+        "        ' to ~',\n",
+        "        CAST(CEIL(max_autoscale_workers * 1.5) AS STRING),\n",
+        "        '.'\n",
+        "      )\n",
+        "    WHEN\n",
+        "      flag_mem_pressure\n",
+        "      OR flag_swap_pressure\n",
+        "    THEN\n",
+        "      'UPGRADE NODE TYPE: switch to memory-optimized (r-series) workers; enable elastic disk if not already on.'\n",
+        "    WHEN\n",
+        "      flag_cpu_pressure\n",
+        "    THEN\n",
+        "      'UPGRADE NODE TYPE: switch to compute-optimized (c-series) workers or more vCPUs per node.'\n",
+        "    WHEN\n",
+        "      flag_fixed_oversized\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        'CONVERT TO AUTOSCALING: replace fixed worker_count=',\n",
+        "        CAST(worker_count AS STRING),\n",
+        "        ' with min=',\n",
+        "        CAST(GREATEST(1, CAST(worker_count / 4 AS INT)) AS STRING),\n",
+        "        ', max=',\n",
+        "        CAST(worker_count AS STRING),\n",
+        "        '. Avg CPU only ',\n",
+        "        CAST(avg_cpu_percent AS STRING),\n",
+        "        '%.'\n",
+        "      )\n",
+        "    WHEN\n",
+        "      flag_autoscale_floor_only\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        'LOWER FLOOR: reduce min_autoscale_workers from ',\n",
+        "        CAST(min_autoscale_workers AS STRING),\n",
+        "        ' to 1; keep max at ',\n",
+        "        CAST(max_autoscale_workers AS STRING),\n",
+        "        '.'\n",
+        "      )\n",
+        "    WHEN\n",
+        "      flag_high_idle\n",
+        "      AND flag_loose_termination\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        'TIGHTEN AUTO-TERMINATION: set to 30 min (currently ',\n",
+        "        COALESCE(CAST(auto_termination_minutes AS STRING), 'DISABLED'),\n",
+        "        '). Idle ',\n",
+        "        CAST(idle_percent AS STRING),\n",
+        "        '% of runtime.'\n",
+        "      )\n",
+        "    WHEN\n",
+        "      flag_low_util\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        'DOWNSIZE: smaller worker node type and/or reduce max workers. Avg CPU=',\n",
+        "        CAST(avg_cpu_percent AS STRING),\n",
+        "        '%, p95 mem=',\n",
+        "        CAST(p95_mem_percent AS STRING),\n",
+        "        '%. Consider moving to serverless or job clusters if usage is bursty.'\n",
+        "      )\n",
+        "    ELSE 'NO CHANGE: cluster appears appropriately sized. Continue to monitor.'\n",
+        "  END AS recommendation\n",
+        "FROM\n",
+        "  categorized c"
+      ],
+      "parameters": [
+        {
+          "displayName": "Look-back Days",
+          "keyword": "days_back",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "90"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "columns": [
+        {
+          "displayName": "Cluster Type",
+          "description": "Categorizes clusters as Autoscale or Fixed-Size",
+          "expression": "CASE WHEN `autoscale_enabled` = true THEN 'Autoscale' ELSE 'Fixed-Size' END"
+        },
+        {
+          "displayName": "Auto-Term Band",
+          "description": "Auto-termination compliance band",
+          "expression": "CASE WHEN `auto_termination_minutes` IS NULL THEN 'Disabled' WHEN `auto_termination_minutes` <= 30 THEN '≤30 min' WHEN `auto_termination_minutes` <= 60 THEN '31-60 min' WHEN `auto_termination_minutes` <= 120 THEN '61-120 min' ELSE '>120 min' END"
+        }
+      ]
+    },
+    {
+      "name": "ds_daily_trend",
+      "displayName": "Daily Utilization Trend",
+      "queryLines": [
+        "SELECT\n",
+        "  DATE_TRUNC('DAY', start_time) AS day,\n",
+        "  ROUND(AVG(COALESCE(cpu_user_percent, 0) + COALESCE(cpu_system_percent, 0)), 2) AS avg_cpu_percent,\n",
+        "  ROUND(AVG(mem_used_percent), 2) AS avg_mem_percent,\n",
+        "  COUNT(DISTINCT cluster_id) AS active_clusters\n",
+        "FROM\n",
+        "  system.compute.node_timeline\n",
+        "WHERE\n",
+        "  start_time >= DATEADD(DAY, -:days_back, CURRENT_TIMESTAMP())\n",
+        "  AND cluster_id IN (\n",
+        "    SELECT DISTINCT\n",
+        "      cluster_id\n",
+        "    FROM\n",
+        "      system.compute.clusters\n",
+        "    WHERE\n",
+        "      cluster_source IN ('UI', 'API')\n",
+        "  )\n",
+        "GROUP BY\n",
+        "  1\n",
+        "ORDER BY\n",
+        "  1"
+      ],
+      "parameters": [
+        {
+          "displayName": "Look-back Days",
+          "keyword": "days_back",
+          "dataType": "INTEGER",
+          "defaultSelection": {
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "90"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "main_page",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "title_md",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Cluster Utilization & Right-Sizing Dashboard\n",
+                "\n",
+                "Analysis of **all-purpose (interactive) clusters** over the trailing window selected below. Each cluster is categorized as **Over-Utilized**, **Under-Utilized**, **Right-Sized**, or **Idle/Unused**, with a concrete recommendation for change. Sources: `system.compute.clusters`, `system.compute.node_timeline`, `system.billing.usage`."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_days_back",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f14fb4ef211a4a9a537185c649b83e/datasets/01f14fb4ef211b5797bb86f94ef2c984_days_back",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "parameters": [
+                    {
+                      "name": "days_back",
+                      "keyword": "days_back"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Look-back window (days)",
+                "showTitle": true
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "INTEGER",
+                    "values": [
+                      {
+                        "value": "90"
+                      }
+                    ]
+                  }
+                }
+              },
+              "scale": {
+                "type": "categorical",
+                "sort": {
+                  "by": "custom-order",
+                  "orderedValues": [
+                    7,
+                    14,
+                    30,
+                    60,
+                    90
+                  ]
+                }
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "days_back",
+                    "queryName": "parameter_dashboards/01f14fb4ef211a4a9a537185c649b83e/datasets/01f14fb4ef211b5797bb86f94ef2c984_days_back"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_total",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count_total",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count_total",
+                  "displayName": "Total Clusters"
+                }
+              },
+              "frame": {
+                "title": "Total Clusters",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_over",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count(cluster_id)",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`utilization_category` = 'OVER_UTILIZED'"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Over-Utilized",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(cluster_id)",
+                  "displayName": "Over-Utilized"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_under",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count(cluster_id)",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`utilization_category` = 'UNDER_UTILIZED'"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Under-Utilized",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(cluster_id)",
+                  "displayName": "Under-Utilized"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_right",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count(cluster_id)",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`utilization_category` = 'RIGHT_SIZED'"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Right-Sized",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(cluster_id)",
+                  "displayName": "Right-Sized"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_idle",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count(cluster_id)",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`utilization_category` = 'IDLE_OR_UNUSED'"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Idle / Unused",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(cluster_id)",
+                  "displayName": "Idle / Unused"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_savings",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "sum(estimated_cost_usd)",
+                      "expression": "SUM(`estimated_cost_usd`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`utilization_category` IN ('UNDER_UTILIZED', 'IDLE_OR_UNUSED')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Est. Wasteful Spend (USD)",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(estimated_cost_usd)",
+                  "displayName": "Wasteful Spend"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_category_dist",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "utilization_category",
+                      "expression": "`utilization_category`"
+                    },
+                    {
+                      "name": "cluster_count",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "cluster_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Clusters"
+                },
+                "color": {
+                  "fieldName": "utilization_category",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Category"
+                }
+              },
+              "frame": {
+                "title": "Cluster Distribution by Category",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_top_cost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "cluster_name",
+                      "expression": "`cluster_name`"
+                    },
+                    {
+                      "name": "estimated_cost_usd",
+                      "expression": "`estimated_cost_usd`"
+                    },
+                    {
+                      "name": "utilization_category",
+                      "expression": "`utilization_category`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "estimated_cost_usd",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Estimated Cost (USD)"
+                },
+                "y": {
+                  "fieldName": "cluster_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "Cluster",
+                  "axis": {
+                    "title": ""
+                  }
+                },
+                "color": {
+                  "fieldName": "utilization_category",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Category"
+                }
+              },
+              "frame": {
+                "title": "Top Clusters by Cost (color = category)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 5,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_scatter_cost_util",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "utilization_category",
+                      "expression": "`utilization_category`"
+                    },
+                    {
+                      "name": "avg_cpu_percent",
+                      "expression": "`avg_cpu_percent`"
+                    },
+                    {
+                      "name": "estimated_cost_usd",
+                      "expression": "`estimated_cost_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Cost vs. CPU Utilization",
+                "showTitle": true
+              },
+              "widgetType": "scatter",
+              "encodings": {
+                "x": {
+                  "fieldName": "avg_cpu_percent",
+                  "displayName": "Avg CPU %",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "estimated_cost_usd",
+                  "displayName": "Estimated Cost (USD)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "utilization_category",
+                  "displayName": "Category",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_autoscale_status",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "utilization_category",
+                      "expression": "`utilization_category`"
+                    },
+                    {
+                      "name": "Cluster Type",
+                      "expression": "`Cluster Type`"
+                    },
+                    {
+                      "name": "count(cluster_id)",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "title": "Autoscaling Effectiveness",
+                "showTitle": true
+              },
+              "version": 3,
+              "mark": {
+                "layout": "stack"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Cluster Type",
+                  "displayName": "Cluster Type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(cluster_id)",
+                  "displayName": "Clusters",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "utilization_category",
+                  "displayName": "Category",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_term_band",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "Auto-Term Band",
+                      "expression": "`Auto-Term Band`"
+                    },
+                    {
+                      "name": "count(cluster_id)",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Auto-Termination Settings",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Auto-Term Band",
+                  "displayName": "Auto-Termination",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "custom-order",
+                      "orderedValues": [
+                        "Disabled",
+                        "≤30 min",
+                        "31-60 min",
+                        "61-120 min",
+                        ">120 min"
+                      ]
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "count(cluster_id)",
+                  "displayName": "Clusters",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 14,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_daily_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily_trend",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "avg_cpu_percent",
+                      "expression": "`avg_cpu_percent`"
+                    },
+                    {
+                      "name": "avg_mem_percent",
+                      "expression": "`avg_mem_percent`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Daily Utilization Trend (all clusters)",
+                "showTitle": true
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "displayName": "Day",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fields": [
+                    {
+                      "fieldName": "avg_cpu_percent",
+                      "displayName": "Avg CPU %"
+                    },
+                    {
+                      "fieldName": "avg_mem_percent",
+                      "displayName": "Avg Memory %"
+                    }
+                  ],
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 18,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "table_detail",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "cluster_name",
+                      "expression": "`cluster_name`"
+                    },
+                    {
+                      "name": "utilization_category",
+                      "expression": "`utilization_category`"
+                    },
+                    {
+                      "name": "owned_by",
+                      "expression": "`owned_by`"
+                    },
+                    {
+                      "name": "Cluster Type",
+                      "expression": "`Cluster Type`"
+                    },
+                    {
+                      "name": "avg_cpu_percent",
+                      "expression": "`avg_cpu_percent`"
+                    },
+                    {
+                      "name": "p95_cpu_percent",
+                      "expression": "`p95_cpu_percent`"
+                    },
+                    {
+                      "name": "avg_mem_percent",
+                      "expression": "`avg_mem_percent`"
+                    },
+                    {
+                      "name": "estimated_cost_usd",
+                      "expression": "`estimated_cost_usd`"
+                    },
+                    {
+                      "name": "total_dbus",
+                      "expression": "`total_dbus`"
+                    },
+                    {
+                      "name": "Auto-Term Band",
+                      "expression": "`Auto-Term Band`"
+                    },
+                    {
+                      "name": "recommendation",
+                      "expression": "`recommendation`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Cluster Detail",
+                "showTitle": true
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "cluster_name",
+                    "displayName": "Cluster"
+                  },
+                  {
+                    "fieldName": "utilization_category",
+                    "displayName": "Category"
+                  },
+                  {
+                    "fieldName": "owned_by",
+                    "displayName": "Owner"
+                  },
+                  {
+                    "fieldName": "Cluster Type",
+                    "displayName": "Type"
+                  },
+                  {
+                    "fieldName": "avg_cpu_percent",
+                    "displayName": "Avg CPU %"
+                  },
+                  {
+                    "fieldName": "p95_cpu_percent",
+                    "displayName": "p95 CPU %"
+                  },
+                  {
+                    "fieldName": "avg_mem_percent",
+                    "displayName": "Avg Mem %"
+                  },
+                  {
+                    "fieldName": "estimated_cost_usd",
+                    "displayName": "Cost (USD)"
+                  },
+                  {
+                    "fieldName": "total_dbus",
+                    "displayName": "Total DBUs"
+                  },
+                  {
+                    "fieldName": "Auto-Term Band",
+                    "displayName": "Auto-Term"
+                  },
+                  {
+                    "fieldName": "recommendation",
+                    "displayName": "Recommendation"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 23,
+            "width": 6,
+            "height": 10
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
