@@ -1,5 +1,4 @@
 {
-  "displayName": "Cluster Utilization & Right-Sizing Dashboard",
   "datasets": [
     {
       "name": "ds_cluster_assessment",
@@ -158,7 +157,11 @@
           "defaultSelection": {
             "values": {
               "dataType": "INTEGER",
-              "values": [{ "value": "90" }]
+              "values": [
+                {
+                  "value": "90"
+                }
+              ]
             }
           }
         }
@@ -186,7 +189,14 @@
           "keyword": "days_back",
           "dataType": "INTEGER",
           "defaultSelection": {
-            "values": { "dataType": "INTEGER", "values": [{ "value": "90" }] }
+            "values": {
+              "dataType": "INTEGER",
+              "values": [
+                {
+                  "value": "90"
+                }
+              ]
+            }
           }
         }
       ]
@@ -200,9 +210,20 @@
         {
           "widget": {
             "name": "title_md",
-            "textbox_spec": "# Cluster Utilization & Right-Sizing Dashboard\n\nAnalysis of **all-purpose (interactive) clusters** over the trailing window selected below. Each cluster is categorized as **Over-Utilized**, **Under-Utilized**, **Right-Sized**, or **Idle/Unused**, with a concrete recommendation for change. Sources: `system.compute.clusters`, `system.compute.node_timeline`, `system.billing.usage`."
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Cluster Utilization & Right-Sizing Dashboard\n",
+                "\n",
+                "Analysis of **all-purpose (interactive) clusters** over the trailing window selected below. Each cluster is categorized as **Over-Utilized**, **Under-Utilized**, **Right-Sized**, or **Idle/Unused**, with a concrete recommendation for change. Sources: `system.compute.clusters`, `system.compute.node_timeline`, `system.billing.usage`."
+              ]
+            }
           },
-          "position": { "x": 0, "y": 0, "width": 6, "height": 2 }
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
         },
         {
           "widget": {
@@ -212,7 +233,12 @@
                 "name": "parameter_dashboards/days_back",
                 "query": {
                   "datasetName": "ds_cluster_assessment",
-                  "parameters": [{ "name": "days_back", "keyword": "days_back" }],
+                  "parameters": [
+                    {
+                      "name": "days_back",
+                      "keyword": "days_back"
+                    }
+                  ],
                   "disaggregated": false
                 }
               },
@@ -220,7 +246,12 @@
                 "name": "parameter_dashboards/days_back_trend",
                 "query": {
                   "datasetName": "ds_daily_trend",
-                  "parameters": [{ "name": "days_back", "keyword": "days_back" }],
+                  "parameters": [
+                    {
+                      "name": "days_back",
+                      "keyword": "days_back"
+                    }
+                  ],
                   "disaggregated": false
                 }
               }
@@ -230,362 +261,855 @@
               "widgetType": "filter-single-select",
               "encodings": {
                 "fields": [
-                  { "fieldName": "days_back", "parameterName": "days_back", "queryName": "parameter_dashboards/days_back" },
-                  { "fieldName": "days_back", "parameterName": "days_back", "queryName": "parameter_dashboards/days_back_trend" }
+                  {
+                    "fieldName": "days_back",
+                    "parameterName": "days_back",
+                    "queryName": "parameter_dashboards/days_back"
+                  },
+                  {
+                    "fieldName": "days_back",
+                    "parameterName": "days_back",
+                    "queryName": "parameter_dashboards/days_back_trend"
+                  }
                 ]
               },
-              "frame": { "title": "Look-back window (days)", "showTitle": true }
+              "frame": {
+                "title": "Look-back window (days)",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 0, "y": 2, "width": 2, "height": 1 }
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 1
+          }
         },
         {
           "widget": {
             "name": "kpi_total",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [{ "name": "count_total", "expression": "COUNT(`cluster_id`)" }],
-                "disaggregated": false
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count_total",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 2,
               "widgetType": "counter",
-              "encodings": { "value": { "fieldName": "count_total", "displayName": "Total Clusters" } },
-              "frame": { "title": "Total Clusters", "showTitle": true }
+              "encodings": {
+                "value": {
+                  "fieldName": "count_total",
+                  "displayName": "Total Clusters"
+                }
+              },
+              "frame": {
+                "title": "Total Clusters",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 0, "y": 3, "width": 1, "height": 2 }
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
         },
         {
           "widget": {
             "name": "kpi_over",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [{ "name": "count_over", "expression": "COUNT_IF(`utilization_category`='OVER_UTILIZED')" }],
-                "disaggregated": false
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count_over",
+                      "expression": "COUNT_IF(`utilization_category`='OVER_UTILIZED')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 2,
               "widgetType": "counter",
-              "encodings": { "value": { "fieldName": "count_over", "displayName": "Over-Utilized" } },
-              "frame": { "title": "Over-Utilized", "showTitle": true }
+              "encodings": {
+                "value": {
+                  "fieldName": "count_over",
+                  "displayName": "Over-Utilized"
+                }
+              },
+              "frame": {
+                "title": "Over-Utilized",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 1, "y": 3, "width": 1, "height": 2 }
+          "position": {
+            "x": 1,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
         },
         {
           "widget": {
             "name": "kpi_under",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [{ "name": "count_under", "expression": "COUNT_IF(`utilization_category`='UNDER_UTILIZED')" }],
-                "disaggregated": false
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count_under",
+                      "expression": "COUNT_IF(`utilization_category`='UNDER_UTILIZED')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 2,
               "widgetType": "counter",
-              "encodings": { "value": { "fieldName": "count_under", "displayName": "Under-Utilized" } },
-              "frame": { "title": "Under-Utilized", "showTitle": true }
+              "encodings": {
+                "value": {
+                  "fieldName": "count_under",
+                  "displayName": "Under-Utilized"
+                }
+              },
+              "frame": {
+                "title": "Under-Utilized",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 2, "y": 3, "width": 1, "height": 2 }
+          "position": {
+            "x": 2,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
         },
         {
           "widget": {
             "name": "kpi_right",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [{ "name": "count_right", "expression": "COUNT_IF(`utilization_category`='RIGHT_SIZED')" }],
-                "disaggregated": false
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count_right",
+                      "expression": "COUNT_IF(`utilization_category`='RIGHT_SIZED')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 2,
               "widgetType": "counter",
-              "encodings": { "value": { "fieldName": "count_right", "displayName": "Right-Sized" } },
-              "frame": { "title": "Right-Sized", "showTitle": true }
+              "encodings": {
+                "value": {
+                  "fieldName": "count_right",
+                  "displayName": "Right-Sized"
+                }
+              },
+              "frame": {
+                "title": "Right-Sized",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 3, "y": 3, "width": 1, "height": 2 }
+          "position": {
+            "x": 3,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
         },
         {
           "widget": {
             "name": "kpi_idle",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [{ "name": "count_idle", "expression": "COUNT_IF(`utilization_category`='IDLE_OR_UNUSED')" }],
-                "disaggregated": false
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "count_idle",
+                      "expression": "COUNT_IF(`utilization_category`='IDLE_OR_UNUSED')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 2,
               "widgetType": "counter",
-              "encodings": { "value": { "fieldName": "count_idle", "displayName": "Idle / Unused" } },
-              "frame": { "title": "Idle / Unused", "showTitle": true }
+              "encodings": {
+                "value": {
+                  "fieldName": "count_idle",
+                  "displayName": "Idle / Unused"
+                }
+              },
+              "frame": {
+                "title": "Idle / Unused",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 4, "y": 3, "width": 1, "height": 2 }
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
         },
         {
           "widget": {
             "name": "kpi_savings",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [{ "name": "savings", "expression": "ROUND(SUM(CASE WHEN `utilization_category` IN ('UNDER_UTILIZED','IDLE_OR_UNUSED') THEN `estimated_cost_usd`*0.4 ELSE 0 END), 2)" }],
-                "disaggregated": false
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "savings",
+                      "expression": "ROUND(SUM(CASE WHEN `utilization_category` IN ('UNDER_UTILIZED','IDLE_OR_UNUSED') THEN `estimated_cost_usd`*0.4 ELSE 0 END), 2)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 2,
               "widgetType": "counter",
-              "encodings": { "value": { "fieldName": "savings", "displayName": "Est. Savings (USD)", "format": { "type": "number-currency", "currencyCode": "USD", "decimalPlaces": { "type": "max", "places": 0 } } } },
-              "frame": { "title": "Est. Monthly Savings", "showTitle": true }
+              "encodings": {
+                "value": {
+                  "fieldName": "savings",
+                  "displayName": "Est. Savings (USD)",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "title": "Est. Monthly Savings",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 5, "y": 3, "width": 1, "height": 2 }
+          "position": {
+            "x": 5,
+            "y": 3,
+            "width": 1,
+            "height": 2
+          }
         },
         {
           "widget": {
             "name": "chart_category_dist",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [
-                  { "name": "utilization_category", "expression": "`utilization_category`" },
-                  { "name": "cluster_count", "expression": "COUNT(`cluster_id`)" }
-                ],
-                "disaggregated": false
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "utilization_category",
+                      "expression": "`utilization_category`"
+                    },
+                    {
+                      "name": "cluster_count",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 3,
               "widgetType": "pie",
               "encodings": {
-                "angle": { "fieldName": "cluster_count", "scale": { "type": "quantitative" }, "displayName": "Clusters" },
-                "color": { "fieldName": "utilization_category", "scale": { "type": "categorical" }, "displayName": "Category" }
+                "angle": {
+                  "fieldName": "cluster_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Clusters"
+                },
+                "color": {
+                  "fieldName": "utilization_category",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Category"
+                }
               },
-              "frame": { "title": "Cluster Distribution by Category", "showTitle": true }
+              "frame": {
+                "title": "Cluster Distribution by Category",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 0, "y": 5, "width": 3, "height": 4 }
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 3,
+            "height": 4
+          }
         },
         {
           "widget": {
             "name": "chart_top_cost",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [
-                  { "name": "cluster_name", "expression": "`cluster_name`" },
-                  { "name": "estimated_cost_usd", "expression": "`estimated_cost_usd`" },
-                  { "name": "utilization_category", "expression": "`utilization_category`" }
-                ],
-                "disaggregated": true
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "cluster_name",
+                      "expression": "`cluster_name`"
+                    },
+                    {
+                      "name": "estimated_cost_usd",
+                      "expression": "`estimated_cost_usd`"
+                    },
+                    {
+                      "name": "utilization_category",
+                      "expression": "`utilization_category`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 3,
               "widgetType": "bar",
               "encodings": {
-                "x": { "fieldName": "estimated_cost_usd", "scale": { "type": "quantitative" }, "displayName": "Estimated Cost (USD)" },
-                "y": { "fieldName": "cluster_name", "scale": { "type": "categorical", "sort": { "by": "x-reversed" } }, "displayName": "Cluster", "axis": { "title": "" } },
-                "color": { "fieldName": "utilization_category", "scale": { "type": "categorical" }, "displayName": "Category" }
+                "x": {
+                  "fieldName": "estimated_cost_usd",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Estimated Cost (USD)"
+                },
+                "y": {
+                  "fieldName": "cluster_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "Cluster",
+                  "axis": {
+                    "title": ""
+                  }
+                },
+                "color": {
+                  "fieldName": "utilization_category",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Category"
+                }
               },
-              "frame": { "title": "Top Clusters by Cost (color = category)", "showTitle": true }
+              "frame": {
+                "title": "Top Clusters by Cost (color = category)",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 3, "y": 5, "width": 3, "height": 4 }
+          "position": {
+            "x": 3,
+            "y": 5,
+            "width": 3,
+            "height": 4
+          }
         },
         {
           "widget": {
             "name": "chart_scatter_cost_util",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [
-                  { "name": "cluster_name", "expression": "`cluster_name`" },
-                  { "name": "avg_cpu_percent", "expression": "`avg_cpu_percent`" },
-                  { "name": "estimated_cost_usd", "expression": "`estimated_cost_usd`" },
-                  { "name": "utilization_category", "expression": "`utilization_category`" },
-                  { "name": "total_dbus", "expression": "`total_dbus`" }
-                ],
-                "disaggregated": true
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "cluster_name",
+                      "expression": "`cluster_name`"
+                    },
+                    {
+                      "name": "avg_cpu_percent",
+                      "expression": "`avg_cpu_percent`"
+                    },
+                    {
+                      "name": "estimated_cost_usd",
+                      "expression": "`estimated_cost_usd`"
+                    },
+                    {
+                      "name": "utilization_category",
+                      "expression": "`utilization_category`"
+                    },
+                    {
+                      "name": "total_dbus",
+                      "expression": "`total_dbus`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 3,
               "widgetType": "symbol",
               "encodings": {
-                "x": { "fieldName": "avg_cpu_percent", "scale": { "type": "quantitative" }, "displayName": "Avg CPU %" },
-                "y": { "fieldName": "estimated_cost_usd", "scale": { "type": "quantitative" }, "displayName": "Estimated Cost (USD)" },
-                "color": { "fieldName": "utilization_category", "scale": { "type": "categorical" }, "displayName": "Category" },
-                "size":  { "fieldName": "total_dbus", "scale": { "type": "quantitative" }, "displayName": "DBUs" },
-                "label": { "show": false }
+                "x": {
+                  "fieldName": "avg_cpu_percent",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Avg CPU %"
+                },
+                "y": {
+                  "fieldName": "estimated_cost_usd",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Estimated Cost (USD)"
+                },
+                "color": {
+                  "fieldName": "utilization_category",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Category"
+                },
+                "size": {
+                  "fieldName": "total_dbus",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "DBUs"
+                },
+                "label": {
+                  "show": false
+                }
               },
-              "frame": { "title": "Cost vs Utilization (bubble = DBUs)", "description": "Top-left bubbles = expensive & under-used → highest savings targets", "showTitle": true, "showDescription": true }
+              "frame": {
+                "title": "Cost vs Utilization (bubble = DBUs)",
+                "description": "Top-left bubbles = expensive & under-used → highest savings targets",
+                "showTitle": true,
+                "showDescription": true
+              }
             }
           },
-          "position": { "x": 0, "y": 9, "width": 6, "height": 5 }
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 5
+          }
         },
         {
           "widget": {
             "name": "chart_autoscale_status",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [
-                  { "name": "autoscale_status", "expression": "CASE WHEN NOT `autoscale_enabled` THEN 'No autoscale (fixed)' WHEN `p95_active_workers` >= `max_autoscale_workers` THEN 'Pinned at ceiling' WHEN `p95_active_workers` <= `min_autoscale_workers` AND `min_autoscale_workers` < `max_autoscale_workers` THEN 'Stuck at floor' ELSE 'Scaling normally' END" },
-                  { "name": "cluster_count", "expression": "COUNT(`cluster_id`)" }
-                ],
-                "disaggregated": false
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "autoscale_status",
+                      "expression": "CASE WHEN NOT `autoscale_enabled` THEN 'No autoscale (fixed)' WHEN `p95_active_workers` >= `max_autoscale_workers` THEN 'Pinned at ceiling' WHEN `p95_active_workers` <= `min_autoscale_workers` AND `min_autoscale_workers` < `max_autoscale_workers` THEN 'Stuck at floor' ELSE 'Scaling normally' END"
+                    },
+                    {
+                      "name": "cluster_count",
+                      "expression": "COUNT(`cluster_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 3,
               "widgetType": "bar",
               "encodings": {
-                "x": { "fieldName": "autoscale_status", "scale": { "type": "categorical" }, "displayName": "Autoscale Status" },
-                "y": { "fieldName": "cluster_count", "scale": { "type": "quantitative" }, "displayName": "Clusters" }
+                "x": {
+                  "fieldName": "autoscale_status",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Autoscale Status"
+                },
+                "y": {
+                  "fieldName": "cluster_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Clusters"
+                }
               },
-              "frame": { "title": "Autoscaling Effectiveness", "showTitle": true }
+              "frame": {
+                "title": "Autoscaling Effectiveness",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 0, "y": 14, "width": 3, "height": 4 }
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 3,
+            "height": 4
+          }
         },
         {
           "widget": {
             "name": "chart_term_band",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [
-                  { "name": "termination_band", "expression": "CASE WHEN `auto_termination_minutes` IS NULL THEN 'DISABLED (risky)' WHEN `auto_termination_minutes` <= 30 THEN '<= 30 min (good)' WHEN `auto_termination_minutes` <= 60 THEN '31-60 min (ok)' WHEN `auto_termination_minutes` <= 120 THEN '61-120 min (loose)' ELSE '> 120 min (too loose)' END" },
-                  { "name": "cluster_count", "expression": "COUNT(`cluster_id`)" },
-                  { "name": "avg_idle_percent", "expression": "ROUND(AVG(`idle_percent`),2)" }
-                ],
-                "disaggregated": false
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "termination_band",
+                      "expression": "CASE WHEN `auto_termination_minutes` IS NULL THEN 'DISABLED (risky)' WHEN `auto_termination_minutes` <= 30 THEN '<= 30 min (good)' WHEN `auto_termination_minutes` <= 60 THEN '31-60 min (ok)' WHEN `auto_termination_minutes` <= 120 THEN '61-120 min (loose)' ELSE '> 120 min (too loose)' END"
+                    },
+                    {
+                      "name": "cluster_count",
+                      "expression": "COUNT(`cluster_id`)"
+                    },
+                    {
+                      "name": "avg_idle_percent",
+                      "expression": "ROUND(AVG(`idle_percent`),2)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 3,
               "widgetType": "bar",
               "encodings": {
-                "x": { "fieldName": "termination_band", "scale": { "type": "categorical" }, "displayName": "Auto-Termination Band" },
-                "y": { "fieldName": "cluster_count", "scale": { "type": "quantitative" }, "displayName": "Clusters" }
+                "x": {
+                  "fieldName": "termination_band",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Auto-Termination Band"
+                },
+                "y": {
+                  "fieldName": "cluster_count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Clusters"
+                }
               },
-              "frame": { "title": "Auto-Termination Compliance", "showTitle": true }
+              "frame": {
+                "title": "Auto-Termination Compliance",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 3, "y": 14, "width": 3, "height": 4 }
+          "position": {
+            "x": 3,
+            "y": 14,
+            "width": 3,
+            "height": 4
+          }
         },
         {
           "widget": {
             "name": "chart_daily_trend",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_daily_trend",
-                "fields": [
-                  { "name": "day", "expression": "`day`" },
-                  { "name": "avg_cpu_percent", "expression": "`avg_cpu_percent`" },
-                  { "name": "avg_mem_percent", "expression": "`avg_mem_percent`" }
-                ],
-                "disaggregated": true
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily_trend",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "avg_cpu_percent",
+                      "expression": "`avg_cpu_percent`"
+                    },
+                    {
+                      "name": "avg_mem_percent",
+                      "expression": "`avg_mem_percent`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 3,
               "widgetType": "line",
               "encodings": {
-                "x": { "fieldName": "day", "scale": { "type": "temporal" }, "displayName": "Day" },
-                "y": { "fields": [
-                          { "fieldName": "avg_cpu_percent", "displayName": "Avg CPU %" },
-                          { "fieldName": "avg_mem_percent", "displayName": "Avg Memory %" }
-                        ], "scale": { "type": "quantitative" }, "displayName": "Utilization %" }
+                "x": {
+                  "fieldName": "day",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fields": [
+                    {
+                      "fieldName": "avg_cpu_percent",
+                      "displayName": "Avg CPU %"
+                    },
+                    {
+                      "fieldName": "avg_mem_percent",
+                      "displayName": "Avg Memory %"
+                    }
+                  ],
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Utilization %"
+                }
               },
-              "frame": { "title": "Daily Utilization Trend (all clusters)", "showTitle": true }
+              "frame": {
+                "title": "Daily Utilization Trend (all clusters)",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 0, "y": 18, "width": 6, "height": 5 }
+          "position": {
+            "x": 0,
+            "y": 18,
+            "width": 6,
+            "height": 5
+          }
         },
         {
           "widget": {
             "name": "table_detail",
-            "queries": [{
-              "name": "main_query",
-              "query": {
-                "datasetName": "ds_cluster_assessment",
-                "fields": [
-                  { "name": "cluster_name", "expression": "`cluster_name`" },
-                  { "name": "utilization_category", "expression": "`utilization_category`" },
-                  { "name": "owned_by", "expression": "`owned_by`" },
-                  { "name": "driver_node_type", "expression": "`driver_node_type`" },
-                  { "name": "worker_node_type", "expression": "`worker_node_type`" },
-                  { "name": "worker_config", "expression": "CASE WHEN `autoscale_enabled` THEN CONCAT(CAST(`min_autoscale_workers` AS STRING),' - ',CAST(`max_autoscale_workers` AS STRING),' (auto)') ELSE CONCAT(CAST(`worker_count` AS STRING),' (fixed)') END" },
-                  { "name": "auto_termination_minutes", "expression": "`auto_termination_minutes`" },
-                  { "name": "active_days", "expression": "`active_days`" },
-                  { "name": "avg_cpu_percent", "expression": "`avg_cpu_percent`" },
-                  { "name": "p95_cpu_percent", "expression": "`p95_cpu_percent`" },
-                  { "name": "p95_mem_percent", "expression": "`p95_mem_percent`" },
-                  { "name": "idle_percent", "expression": "`idle_percent`" },
-                  { "name": "p95_active_workers", "expression": "`p95_active_workers`" },
-                  { "name": "estimated_cost_usd", "expression": "`estimated_cost_usd`" },
-                  { "name": "reason", "expression": "`reason`" },
-                  { "name": "recommendation", "expression": "`recommendation`" }
-                ],
-                "disaggregated": true
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "cluster_name",
+                      "expression": "`cluster_name`"
+                    },
+                    {
+                      "name": "utilization_category",
+                      "expression": "`utilization_category`"
+                    },
+                    {
+                      "name": "owned_by",
+                      "expression": "`owned_by`"
+                    },
+                    {
+                      "name": "driver_node_type",
+                      "expression": "`driver_node_type`"
+                    },
+                    {
+                      "name": "worker_node_type",
+                      "expression": "`worker_node_type`"
+                    },
+                    {
+                      "name": "worker_config",
+                      "expression": "CASE WHEN `autoscale_enabled` THEN CONCAT(CAST(`min_autoscale_workers` AS STRING),' - ',CAST(`max_autoscale_workers` AS STRING),' (auto)') ELSE CONCAT(CAST(`worker_count` AS STRING),' (fixed)') END"
+                    },
+                    {
+                      "name": "auto_termination_minutes",
+                      "expression": "`auto_termination_minutes`"
+                    },
+                    {
+                      "name": "active_days",
+                      "expression": "`active_days`"
+                    },
+                    {
+                      "name": "avg_cpu_percent",
+                      "expression": "`avg_cpu_percent`"
+                    },
+                    {
+                      "name": "p95_cpu_percent",
+                      "expression": "`p95_cpu_percent`"
+                    },
+                    {
+                      "name": "p95_mem_percent",
+                      "expression": "`p95_mem_percent`"
+                    },
+                    {
+                      "name": "idle_percent",
+                      "expression": "`idle_percent`"
+                    },
+                    {
+                      "name": "p95_active_workers",
+                      "expression": "`p95_active_workers`"
+                    },
+                    {
+                      "name": "estimated_cost_usd",
+                      "expression": "`estimated_cost_usd`"
+                    },
+                    {
+                      "name": "reason",
+                      "expression": "`reason`"
+                    },
+                    {
+                      "name": "recommendation",
+                      "expression": "`recommendation`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
               }
-            }],
+            ],
             "spec": {
               "version": 1,
               "widgetType": "table",
               "encodings": {
                 "columns": [
-                  { "fieldName": "cluster_name",          "displayName": "Cluster",           "type": "string"  },
-                  { "fieldName": "utilization_category",  "displayName": "Category",          "type": "string"  },
-                  { "fieldName": "owned_by",              "displayName": "Owner",             "type": "string"  },
-                  { "fieldName": "driver_node_type",      "displayName": "Driver Node",       "type": "string"  },
-                  { "fieldName": "worker_node_type",      "displayName": "Worker Node",       "type": "string"  },
-                  { "fieldName": "worker_config",         "displayName": "Workers",           "type": "string"  },
-                  { "fieldName": "auto_termination_minutes","displayName": "Auto-Term (min)", "type": "integer" },
-                  { "fieldName": "active_days",           "displayName": "Active Days",       "type": "integer" },
-                  { "fieldName": "avg_cpu_percent",       "displayName": "Avg CPU %",         "type": "float"   },
-                  { "fieldName": "p95_cpu_percent",       "displayName": "p95 CPU %",         "type": "float"   },
-                  { "fieldName": "p95_mem_percent",       "displayName": "p95 Mem %",         "type": "float"   },
-                  { "fieldName": "idle_percent",          "displayName": "Idle %",            "type": "float"   },
-                  { "fieldName": "p95_active_workers",    "displayName": "p95 Workers",       "type": "float"   },
-                  { "fieldName": "estimated_cost_usd",    "displayName": "Cost (USD)",        "type": "float"   },
-                  { "fieldName": "reason",                "displayName": "Why",               "type": "string"  },
-                  { "fieldName": "recommendation",        "displayName": "Recommendation",    "type": "string"  }
+                  {
+                    "fieldName": "cluster_name",
+                    "displayName": "Cluster",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "utilization_category",
+                    "displayName": "Category",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "owned_by",
+                    "displayName": "Owner",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "driver_node_type",
+                    "displayName": "Driver Node",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "worker_node_type",
+                    "displayName": "Worker Node",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "worker_config",
+                    "displayName": "Workers",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "auto_termination_minutes",
+                    "displayName": "Auto-Term (min)",
+                    "type": "integer"
+                  },
+                  {
+                    "fieldName": "active_days",
+                    "displayName": "Active Days",
+                    "type": "integer"
+                  },
+                  {
+                    "fieldName": "avg_cpu_percent",
+                    "displayName": "Avg CPU %",
+                    "type": "float"
+                  },
+                  {
+                    "fieldName": "p95_cpu_percent",
+                    "displayName": "p95 CPU %",
+                    "type": "float"
+                  },
+                  {
+                    "fieldName": "p95_mem_percent",
+                    "displayName": "p95 Mem %",
+                    "type": "float"
+                  },
+                  {
+                    "fieldName": "idle_percent",
+                    "displayName": "Idle %",
+                    "type": "float"
+                  },
+                  {
+                    "fieldName": "p95_active_workers",
+                    "displayName": "p95 Workers",
+                    "type": "float"
+                  },
+                  {
+                    "fieldName": "estimated_cost_usd",
+                    "displayName": "Cost (USD)",
+                    "type": "float"
+                  },
+                  {
+                    "fieldName": "reason",
+                    "displayName": "Why",
+                    "type": "string"
+                  },
+                  {
+                    "fieldName": "recommendation",
+                    "displayName": "Recommendation",
+                    "type": "string"
+                  }
                 ]
               },
               "invisibleColumns": [],
-              "frame": { "title": "Cluster Detail & Recommendations", "showTitle": true }
+              "frame": {
+                "title": "Cluster Detail & Recommendations",
+                "showTitle": true
+              }
             }
           },
-          "position": { "x": 0, "y": 23, "width": 6, "height": 10 }
+          "position": {
+            "x": 0,
+            "y": 23,
+            "width": 6,
+            "height": 10
+          }
         }
-      ]
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
     }
-  ]
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
 }

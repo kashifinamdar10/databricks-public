@@ -165,12 +165,15 @@
         "    CASE\n",
         "      WHEN b.max_autoscale_workers IS NOT NULL THEN TRUE\n",
         "      ELSE FALSE\n",
-        "    END AS autoscale_enabled\n",
+        "    END AS autoscale_enabled,\n",
+        "    w.workspace_name\n",
         "  FROM\n",
         "    cluster_base b\n",
         "      LEFT JOIN per_cluster p USING (cluster_id)\n",
         "      LEFT JOIN scaling_agg s USING (cluster_id)\n",
         "      LEFT JOIN cluster_cost c USING (cluster_id)\n",
+        "      LEFT JOIN system.access.workspaces_latest w\n",
+        "        ON b.workspace_id = CAST(w.workspace_id AS STRING)\n",
         "),\n",
         "flagged AS (\n",
         "  SELECT\n",
@@ -512,7 +515,7 @@
           "position": {
             "x": 0,
             "y": 0,
-            "width": 6,
+            "width": 12,
             "height": 2
           }
         },
@@ -579,7 +582,7 @@
           "position": {
             "x": 0,
             "y": 2,
-            "width": 2,
+            "width": 4,
             "height": 1
           }
         },
@@ -619,7 +622,7 @@
           "position": {
             "x": 0,
             "y": 3,
-            "width": 1,
+            "width": 2,
             "height": 2
           }
         },
@@ -662,9 +665,9 @@
             }
           },
           "position": {
-            "x": 1,
+            "x": 2,
             "y": 3,
-            "width": 1,
+            "width": 2,
             "height": 2
           }
         },
@@ -707,9 +710,9 @@
             }
           },
           "position": {
-            "x": 2,
+            "x": 4,
             "y": 3,
-            "width": 1,
+            "width": 2,
             "height": 2
           }
         },
@@ -752,9 +755,9 @@
             }
           },
           "position": {
-            "x": 3,
+            "x": 6,
             "y": 3,
-            "width": 1,
+            "width": 2,
             "height": 2
           }
         },
@@ -797,9 +800,9 @@
             }
           },
           "position": {
-            "x": 4,
+            "x": 8,
             "y": 3,
-            "width": 1,
+            "width": 2,
             "height": 2
           }
         },
@@ -842,9 +845,9 @@
             }
           },
           "position": {
-            "x": 5,
+            "x": 10,
             "y": 3,
-            "width": 1,
+            "width": 2,
             "height": 2
           }
         },
@@ -898,7 +901,7 @@
           "position": {
             "x": 0,
             "y": 5,
-            "width": 3,
+            "width": 6,
             "height": 4
           }
         },
@@ -967,9 +970,9 @@
             }
           },
           "position": {
-            "x": 3,
+            "x": 6,
             "y": 5,
-            "width": 3,
+            "width": 6,
             "height": 4
           }
         },
@@ -1034,7 +1037,7 @@
           "position": {
             "x": 0,
             "y": 9,
-            "width": 6,
+            "width": 12,
             "height": 5
           }
         },
@@ -1102,7 +1105,7 @@
           "position": {
             "x": 0,
             "y": 14,
-            "width": 3,
+            "width": 6,
             "height": 4
           }
         },
@@ -1164,9 +1167,9 @@
             }
           },
           "position": {
-            "x": 3,
+            "x": 6,
             "y": 14,
-            "width": 3,
+            "width": 6,
             "height": 4
           }
         },
@@ -1232,7 +1235,7 @@
           "position": {
             "x": 0,
             "y": 18,
-            "width": 6,
+            "width": 12,
             "height": 5
           }
         },
@@ -1248,6 +1251,10 @@
                     {
                       "name": "cluster_name",
                       "expression": "`cluster_name`"
+                    },
+                    {
+                      "name": "workspace_name",
+                      "expression": "`workspace_name`"
                     },
                     {
                       "name": "utilization_category",
@@ -1308,6 +1315,10 @@
                     "displayName": "Cluster"
                   },
                   {
+                    "fieldName": "workspace_name",
+                    "displayName": "Workspace"
+                  },
+                  {
                     "fieldName": "utilization_category",
                     "displayName": "Category"
                   },
@@ -1354,12 +1365,65 @@
           "position": {
             "x": 0,
             "y": 23,
-            "width": 6,
+            "width": 12,
             "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_workspace",
+            "queries": [
+              {
+                "name": "dashboards/01f14fb4ef211a4a9a537185c649b83e/datasets/01f14fb4ef211b5797bb86f94ef2c984_workspace_name",
+                "query": {
+                  "datasetName": "ds_cluster_assessment",
+                  "fields": [
+                    {
+                      "name": "workspace_name",
+                      "expression": "`workspace_name`"
+                    },
+                    {
+                      "name": "workspace_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Workspace",
+                "showTitle": true
+              },
+              "scale": {
+                "type": "categorical",
+                "sort": {
+                  "by": "natural-order"
+                }
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "workspace_name",
+                    "queryName": "dashboards/01f14fb4ef211a4a9a537185c649b83e/datasets/01f14fb4ef211b5797bb86f94ef2c984_workspace_name"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 4,
+            "height": 1
           }
         }
       ],
-      "pageType": "PAGE_TYPE_CANVAS"
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
     }
   ],
   "uiSettings": {
