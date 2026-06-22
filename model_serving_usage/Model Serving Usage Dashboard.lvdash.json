@@ -1,0 +1,1090 @@
+{
+  "datasets": [
+    {
+      "name": "cost_per_endpoint",
+      "displayName": "Cost per Endpoint",
+      "queryLines": [
+        "SELECT\n",
+        "  se.endpoint_name,\n",
+        "  ROUND(\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.effective_list.default, lp.pricing.default)),\n",
+        "    2\n",
+        "  ) AS estimated_cost_usd\n",
+        "FROM\n",
+        "  system.billing.usage u\n",
+        "    LEFT JOIN system.billing.list_prices lp\n",
+        "      ON u.sku_name = lp.sku_name\n",
+        "      AND u.cloud = lp.cloud\n",
+        "      AND u.usage_start_time >= lp.price_start_time\n",
+        "      AND (\n",
+        "        lp.price_end_time IS NULL\n",
+        "        OR u.usage_start_time < lp.price_end_time\n",
+        "      )\n",
+        "    INNER JOIN system.serving.served_entities se\n",
+        "      ON u.usage_metadata.endpoint_id = se.endpoint_id\n",
+        "WHERE\n",
+        "  (\n",
+        "    u.sku_name LIKE '%SERVING%'\n",
+        "    OR u.sku_name LIKE '%MODEL_INFERENCE%'\n",
+        "  )\n",
+        "  AND u.usage_date >= :date_range.min\n",
+        "  AND u.usage_date <= :date_range.max\n",
+        "GROUP BY\n",
+        "  se.endpoint_name\n",
+        "ORDER BY\n",
+        "  estimated_cost_usd DESC\n",
+        "LIMIT 10"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "requests_by_endpoint",
+      "displayName": "Requests by Endpoint",
+      "queryLines": [
+        "SELECT\n",
+        "  se.endpoint_name,\n",
+        "  COUNT(*) AS total_requests\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage eu\n",
+        "    JOIN system.serving.served_entities se\n",
+        "      ON eu.served_entity_id = se.served_entity_id\n",
+        "WHERE\n",
+        "  eu.request_time >= :date_range.min\n",
+        "  AND eu.request_time <= :date_range.max\n",
+        "GROUP BY\n",
+        "  se.endpoint_name\n",
+        "ORDER BY\n",
+        "  total_requests DESC\n",
+        "LIMIT 10"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "total_requests_30d",
+      "displayName": "Total Requests",
+      "queryLines": [
+        "SELECT\n",
+        "  COUNT(*) AS total_requests\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage\n",
+        "WHERE\n",
+        "  request_time >= :date_range.min\n",
+        "  AND request_time <= :date_range.max"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "total_cost_30d",
+      "displayName": "Total Estimated Cost",
+      "queryLines": [
+        "SELECT\n",
+        "  ROUND(\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.effective_list.default, lp.pricing.default)),\n",
+        "    2\n",
+        "  ) AS estimated_cost_usd\n",
+        "FROM\n",
+        "  system.billing.usage u\n",
+        "    LEFT JOIN system.billing.list_prices lp\n",
+        "      ON u.sku_name = lp.sku_name\n",
+        "      AND u.cloud = lp.cloud\n",
+        "      AND u.usage_start_time >= lp.price_start_time\n",
+        "      AND (\n",
+        "        lp.price_end_time IS NULL\n",
+        "        OR u.usage_start_time < lp.price_end_time\n",
+        "      )\n",
+        "WHERE\n",
+        "  (\n",
+        "    u.sku_name LIKE '%SERVING%'\n",
+        "    OR u.sku_name LIKE '%MODEL_INFERENCE%'\n",
+        "  )\n",
+        "  AND u.usage_date >= :date_range.min\n",
+        "  AND u.usage_date <= :date_range.max"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "daily_request_volume",
+      "displayName": "Daily Request Volume",
+      "queryLines": [
+        "SELECT\n",
+        "  DATE(eu.request_time) AS request_date,\n",
+        "  COUNT(*) AS requests\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage eu\n",
+        "WHERE\n",
+        "  eu.request_time >= :date_range.min\n",
+        "  AND eu.request_time <= :date_range.max\n",
+        "GROUP BY\n",
+        "  1\n",
+        "ORDER BY\n",
+        "  1"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "daily_cost_trend",
+      "displayName": "Daily Cost Trend by Endpoint",
+      "queryLines": [
+        "WITH top_endpoints AS (\n",
+        "  SELECT\n",
+        "    se.endpoint_name\n",
+        "  FROM\n",
+        "    system.billing.usage u\n",
+        "      INNER JOIN system.serving.served_entities se\n",
+        "        ON u.usage_metadata.endpoint_id = se.endpoint_id\n",
+        "  WHERE\n",
+        "    (\n",
+        "      u.sku_name LIKE '%SERVING%'\n",
+        "      OR u.sku_name LIKE '%MODEL_INFERENCE%'\n",
+        "    )\n",
+        "    AND u.usage_date >= :date_range.min\n",
+        "    AND u.usage_date <= :date_range.max\n",
+        "  GROUP BY\n",
+        "    se.endpoint_name\n",
+        "  ORDER BY\n",
+        "    SUM(u.usage_quantity) DESC\n",
+        "  LIMIT 5\n",
+        ")\n",
+        "SELECT\n",
+        "  u.usage_date,\n",
+        "  se.endpoint_name,\n",
+        "  ROUND(\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.effective_list.default, lp.pricing.default)),\n",
+        "    2\n",
+        "  ) AS estimated_cost_usd\n",
+        "FROM\n",
+        "  system.billing.usage u\n",
+        "    LEFT JOIN system.billing.list_prices lp\n",
+        "      ON u.sku_name = lp.sku_name\n",
+        "      AND u.cloud = lp.cloud\n",
+        "      AND u.usage_start_time >= lp.price_start_time\n",
+        "      AND (\n",
+        "        lp.price_end_time IS NULL\n",
+        "        OR u.usage_start_time < lp.price_end_time\n",
+        "      )\n",
+        "    INNER JOIN system.serving.served_entities se\n",
+        "      ON u.usage_metadata.endpoint_id = se.endpoint_id\n",
+        "WHERE\n",
+        "  (\n",
+        "    u.sku_name LIKE '%SERVING%'\n",
+        "    OR u.sku_name LIKE '%MODEL_INFERENCE%'\n",
+        "  )\n",
+        "  AND u.usage_date >= :date_range.min\n",
+        "  AND u.usage_date <= :date_range.max\n",
+        "  AND se.endpoint_name IN (\n",
+        "    SELECT\n",
+        "      endpoint_name\n",
+        "    FROM\n",
+        "      top_endpoints\n",
+        "  )\n",
+        "GROUP BY\n",
+        "  u.usage_date,\n",
+        "  se.endpoint_name\n",
+        "ORDER BY\n",
+        "  u.usage_date"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "total_tokens_30d",
+      "displayName": "Total Tokens",
+      "queryLines": [
+        "SELECT\n",
+        "  SUM(input_token_count + output_token_count) AS total_tokens\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage\n",
+        "WHERE\n",
+        "  request_time >= :date_range.min\n",
+        "  AND request_time <= :date_range.max"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "error_rate_by_endpoint",
+      "displayName": "Error Rate by Endpoint",
+      "queryLines": [
+        "SELECT\n",
+        "  se.endpoint_name,\n",
+        "  ROUND(\n",
+        "    100.0\n",
+        "      * SUM(\n",
+        "        CASE\n",
+        "          WHEN eu.status_code >= 400 THEN 1\n",
+        "          ELSE 0\n",
+        "        END\n",
+        "      )\n",
+        "      / COUNT(*),\n",
+        "    2\n",
+        "  ) AS error_pct\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage eu\n",
+        "    JOIN system.serving.served_entities se\n",
+        "      ON eu.served_entity_id = se.served_entity_id\n",
+        "WHERE\n",
+        "  eu.request_time >= :date_range.min\n",
+        "  AND eu.request_time <= :date_range.max\n",
+        "GROUP BY\n",
+        "  se.endpoint_name\n",
+        "HAVING\n",
+        "  COUNT(*) > 100\n",
+        "ORDER BY\n",
+        "  error_pct DESC\n",
+        "LIMIT 10"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "usage_by_requester",
+      "displayName": "Usage by Requester",
+      "queryLines": [
+        "SELECT\n",
+        "  eu.requester,\n",
+        "  COUNT(*) AS total_requests,\n",
+        "  SUM(eu.input_token_count + eu.output_token_count) AS total_tokens\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage eu\n",
+        "WHERE\n",
+        "  eu.request_time >= :date_range.min\n",
+        "  AND eu.request_time <= :date_range.max\n",
+        "GROUP BY\n",
+        "  eu.requester\n",
+        "ORDER BY\n",
+        "  total_tokens DESC\n",
+        "LIMIT 10"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "hourly_pattern",
+      "displayName": "Hourly Request Pattern",
+      "queryLines": [
+        "SELECT\n",
+        "  HOUR(eu.request_time) AS hour_of_day,\n",
+        "  COUNT(*) AS total_requests\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage eu\n",
+        "WHERE\n",
+        "  eu.request_time >= :date_range.min\n",
+        "  AND eu.request_time <= :date_range.max\n",
+        "GROUP BY\n",
+        "  1\n",
+        "ORDER BY\n",
+        "  1"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "a1719e7d",
+      "displayName": "Page 1",
+      "layout": [
+        {
+          "widget": {
+            "name": "total_requests_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "total_requests_30d",
+                  "fields": [
+                    {
+                      "name": "sum(total_requests)",
+                      "expression": "SUM(`total_requests`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Total Requests (30d)",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_requests)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "total_tokens_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "total_tokens_30d",
+                  "fields": [
+                    {
+                      "name": "sum(total_tokens)",
+                      "expression": "SUM(`total_tokens`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Total Tokens (30d)",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_tokens)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "total_cost_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "total_cost_30d",
+                  "fields": [
+                    {
+                      "name": "sum(estimated_cost_usd)",
+                      "expression": "SUM(`estimated_cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Total Estimated Cost (30d)",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(estimated_cost_usd)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "requests_by_endpoint_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "requests_by_endpoint",
+                  "fields": [
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    },
+                    {
+                      "name": "sum(total_requests)",
+                      "expression": "SUM(`total_requests`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Requests by Endpoint (Top 10)",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "endpoint_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(total_requests)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "daily_volume_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily_request_volume",
+                  "fields": [
+                    {
+                      "name": "request_date",
+                      "expression": "`request_date`"
+                    },
+                    {
+                      "name": "sum(requests)",
+                      "expression": "SUM(`requests`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Daily Request Volume Trend",
+                "showTitle": true
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "request_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(requests)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "daily_cost_trend_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily_cost_trend",
+                  "fields": [
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    },
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "sum(estimated_cost_usd)",
+                      "expression": "SUM(`estimated_cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Daily Cost Trend by Endpoint (Top 5)",
+                "showTitle": true
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(estimated_cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "endpoint_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "cost_per_endpoint_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cost_per_endpoint",
+                  "fields": [
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    },
+                    {
+                      "name": "sum(estimated_cost_usd)",
+                      "expression": "SUM(`estimated_cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Cost per Endpoint (Top 10)",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "endpoint_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(estimated_cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "usage_by_requester_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "usage_by_requester",
+                  "fields": [
+                    {
+                      "name": "requester",
+                      "expression": "`requester`"
+                    },
+                    {
+                      "name": "sum(total_tokens)",
+                      "expression": "SUM(`total_tokens`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Usage by Requester (Top 10)",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "requester",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(total_tokens)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "error_rate_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "error_rate_by_endpoint",
+                  "fields": [
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    },
+                    {
+                      "name": "sum(error_pct)",
+                      "expression": "SUM(`error_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Error Rate by Endpoint",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "endpoint_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(error_pct)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 14,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "hourly_pattern_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "hourly_pattern",
+                  "fields": [
+                    {
+                      "name": "hour_of_day",
+                      "expression": "`hour_of_day`"
+                    },
+                    {
+                      "name": "sum(total_requests)",
+                      "expression": "SUM(`total_requests`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Hourly Request Pattern",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "hour_of_day",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(total_requests)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 14,
+            "width": 4,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "global_filters",
+      "displayName": "Global Filters",
+      "layout": [
+        {
+          "widget": {
+            "name": "date_range_filter",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f16e7774721c50bd1878fa348051a5/datasets/01f16e77c293139fb5aba6704743ae3b_date_range",
+                "query": {
+                  "datasetName": "total_requests_30d",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "selection": {
+                "defaultSelection": {
+                  "range": {
+                    "dataType": "DATE",
+                    "min": {
+                      "value": "now-30d/d"
+                    },
+                    "max": {
+                      "value": "now/d"
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "title": "Date Range",
+                "showTitle": true
+              },
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "parameter_dashboards/01f16e7774721c50bd1878fa348051a5/datasets/01f16e77c293139fb5aba6704743ae3b_date_range"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {
+        "light": "#FAFAFB",
+        "dark": "#1F272D"
+      },
+      "widgetBackgroundColor": {
+        "light": "#FFFFFF",
+        "dark": "#11171C"
+      },
+      "widgetBorderColor": {
+        "light": "#FFFFFF",
+        "dark": "#11171C"
+      },
+      "fontColor": {
+        "light": "#000000",
+        "dark": "#E8ECF0"
+      },
+      "selectionColor": {
+        "light": "#2272B4",
+        "dark": "#8ACAFF"
+      },
+      "visualizationColors": [
+        "#077A9D",
+        "#FFAB00",
+        "#00A972",
+        "#FF3621",
+        "#8BCAE7",
+        "#AB4057",
+        "#99DDB4",
+        "#FCA4A1",
+        "#919191",
+        "#BF7080",
+        "#077A9D"
+      ],
+      "widgetHeaderAlignment": "CENTER"
+    },
+    "applyModeEnabled": false
+  }
+}
