@@ -452,12 +452,321 @@
           }
         }
       ]
+    },
+    {
+      "name": "batch_total_cost",
+      "displayName": "Batch Inference Total Cost",
+      "queryLines": [
+        "SELECT\n",
+        "  ROUND(\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.effective_list.default, lp.pricing.default)),\n",
+        "    2\n",
+        "  ) AS batch_cost_usd,\n",
+        "  SUM(u.usage_quantity) AS total_dbus\n",
+        "FROM\n",
+        "  system.billing.usage u\n",
+        "    LEFT JOIN system.billing.list_prices lp\n",
+        "      ON u.sku_name = lp.sku_name\n",
+        "      AND u.cloud = lp.cloud\n",
+        "      AND u.usage_start_time >= lp.price_start_time\n",
+        "      AND (\n",
+        "        lp.price_end_time IS NULL\n",
+        "        OR u.usage_start_time < lp.price_end_time\n",
+        "      )\n",
+        "WHERE\n",
+        "  u.billing_origin_product = 'MODEL_SERVING'\n",
+        "  AND u.product_features.model_serving.offering_type = 'BATCH_INFERENCE'\n",
+        "  AND u.usage_date >= :date_range.min\n",
+        "  AND u.usage_date <= :date_range.max"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "batch_by_warehouse",
+      "displayName": "Batch Inference by Warehouse",
+      "queryLines": [
+        "SELECT\n",
+        "  u.usage_metadata.warehouse_id AS warehouse_id,\n",
+        "  u.usage_metadata.endpoint_name AS endpoint_name,\n",
+        "  SUM(u.usage_quantity) AS total_dbus,\n",
+        "  ROUND(\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.effective_list.default, lp.pricing.default)),\n",
+        "    2\n",
+        "  ) AS batch_cost_usd\n",
+        "FROM\n",
+        "  system.billing.usage u\n",
+        "    LEFT JOIN system.billing.list_prices lp\n",
+        "      ON u.sku_name = lp.sku_name\n",
+        "      AND u.cloud = lp.cloud\n",
+        "      AND u.usage_start_time >= lp.price_start_time\n",
+        "      AND (\n",
+        "        lp.price_end_time IS NULL\n",
+        "        OR u.usage_start_time < lp.price_end_time\n",
+        "      )\n",
+        "WHERE\n",
+        "  u.billing_origin_product = 'MODEL_SERVING'\n",
+        "  AND u.product_features.model_serving.offering_type = 'BATCH_INFERENCE'\n",
+        "  AND u.usage_metadata.warehouse_id IS NOT NULL\n",
+        "  AND u.usage_date >= :date_range.min\n",
+        "  AND u.usage_date <= :date_range.max\n",
+        "GROUP BY\n",
+        "  u.usage_metadata.warehouse_id,\n",
+        "  u.usage_metadata.endpoint_name\n",
+        "ORDER BY\n",
+        "  batch_cost_usd DESC\n",
+        "LIMIT 10"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "rt_vs_batch_cost",
+      "displayName": "Real-Time vs Batch Cost Comparison",
+      "queryLines": [
+        "SELECT\n",
+        "  COALESCE(u.product_features.model_serving.offering_type, 'UNKNOWN') AS inference_type,\n",
+        "  SUM(u.usage_quantity) AS total_dbus,\n",
+        "  ROUND(\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.effective_list.default, lp.pricing.default)),\n",
+        "    2\n",
+        "  ) AS cost_usd\n",
+        "FROM\n",
+        "  system.billing.usage u\n",
+        "    LEFT JOIN system.billing.list_prices lp\n",
+        "      ON u.sku_name = lp.sku_name\n",
+        "      AND u.cloud = lp.cloud\n",
+        "      AND u.usage_start_time >= lp.price_start_time\n",
+        "      AND (\n",
+        "        lp.price_end_time IS NULL\n",
+        "        OR u.usage_start_time < lp.price_end_time\n",
+        "      )\n",
+        "WHERE\n",
+        "  u.billing_origin_product = 'MODEL_SERVING'\n",
+        "  AND u.usage_date >= :date_range.min\n",
+        "  AND u.usage_date <= :date_range.max\n",
+        "GROUP BY\n",
+        "  u.product_features.model_serving.offering_type\n",
+        "ORDER BY\n",
+        "  cost_usd DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "batch_by_job",
+      "displayName": "Batch Inference by Job",
+      "queryLines": [
+        "SELECT\n",
+        "  u.usage_metadata.job_id AS job_id,\n",
+        "  u.usage_metadata.endpoint_name AS endpoint_name,\n",
+        "  SUM(u.usage_quantity) AS total_dbus,\n",
+        "  ROUND(\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.effective_list.default, lp.pricing.default)),\n",
+        "    2\n",
+        "  ) AS batch_cost_usd\n",
+        "FROM\n",
+        "  system.billing.usage u\n",
+        "    LEFT JOIN system.billing.list_prices lp\n",
+        "      ON u.sku_name = lp.sku_name\n",
+        "      AND u.cloud = lp.cloud\n",
+        "      AND u.usage_start_time >= lp.price_start_time\n",
+        "      AND (\n",
+        "        lp.price_end_time IS NULL\n",
+        "        OR u.usage_start_time < lp.price_end_time\n",
+        "      )\n",
+        "WHERE\n",
+        "  u.billing_origin_product = 'MODEL_SERVING'\n",
+        "  AND u.product_features.model_serving.offering_type = 'BATCH_INFERENCE'\n",
+        "  AND u.usage_metadata.job_id IS NOT NULL\n",
+        "  AND u.usage_date >= :date_range.min\n",
+        "  AND u.usage_date <= :date_range.max\n",
+        "GROUP BY\n",
+        "  u.usage_metadata.job_id,\n",
+        "  u.usage_metadata.endpoint_name\n",
+        "ORDER BY\n",
+        "  batch_cost_usd DESC\n",
+        "LIMIT 10"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "batch_by_endpoint",
+      "displayName": "Batch Inference by Endpoint",
+      "queryLines": [
+        "SELECT\n",
+        "  u.usage_metadata.endpoint_name AS endpoint_name,\n",
+        "  SUM(u.usage_quantity) AS total_dbus,\n",
+        "  ROUND(\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.effective_list.default, lp.pricing.default)),\n",
+        "    2\n",
+        "  ) AS batch_cost_usd\n",
+        "FROM\n",
+        "  system.billing.usage u\n",
+        "    LEFT JOIN system.billing.list_prices lp\n",
+        "      ON u.sku_name = lp.sku_name\n",
+        "      AND u.cloud = lp.cloud\n",
+        "      AND u.usage_start_time >= lp.price_start_time\n",
+        "      AND (\n",
+        "        lp.price_end_time IS NULL\n",
+        "        OR u.usage_start_time < lp.price_end_time\n",
+        "      )\n",
+        "WHERE\n",
+        "  u.billing_origin_product = 'MODEL_SERVING'\n",
+        "  AND u.product_features.model_serving.offering_type = 'BATCH_INFERENCE'\n",
+        "  AND u.usage_date >= :date_range.min\n",
+        "  AND u.usage_date <= :date_range.max\n",
+        "GROUP BY\n",
+        "  u.usage_metadata.endpoint_name\n",
+        "ORDER BY\n",
+        "  batch_cost_usd DESC\n",
+        "LIMIT 10"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "batch_daily_cost",
+      "displayName": "Batch Inference Daily Cost",
+      "queryLines": [
+        "SELECT\n",
+        "  u.usage_date,\n",
+        "  SUM(u.usage_quantity) AS total_dbus,\n",
+        "  ROUND(\n",
+        "    SUM(u.usage_quantity * COALESCE(lp.pricing.effective_list.default, lp.pricing.default)),\n",
+        "    2\n",
+        "  ) AS batch_cost_usd\n",
+        "FROM\n",
+        "  system.billing.usage u\n",
+        "    LEFT JOIN system.billing.list_prices lp\n",
+        "      ON u.sku_name = lp.sku_name\n",
+        "      AND u.cloud = lp.cloud\n",
+        "      AND u.usage_start_time >= lp.price_start_time\n",
+        "      AND (\n",
+        "        lp.price_end_time IS NULL\n",
+        "        OR u.usage_start_time < lp.price_end_time\n",
+        "      )\n",
+        "WHERE\n",
+        "  u.billing_origin_product = 'MODEL_SERVING'\n",
+        "  AND u.product_features.model_serving.offering_type = 'BATCH_INFERENCE'\n",
+        "  AND u.usage_date >= :date_range.min\n",
+        "  AND u.usage_date <= :date_range.max\n",
+        "GROUP BY\n",
+        "  u.usage_date\n",
+        "ORDER BY\n",
+        "  u.usage_date"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
     }
   ],
   "pages": [
     {
       "name": "a1719e7d",
-      "displayName": "Page 1",
+      "displayName": "Real-Time Serving",
       "layout": [
         {
           "widget": {
@@ -1045,6 +1354,393 @@
         }
       ],
       "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "batch_inference",
+      "displayName": "Batch Inference",
+      "layout": [
+        {
+          "widget": {
+            "name": "batch_cost_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "batch_total_cost",
+                  "fields": [
+                    {
+                      "name": "sum(batch_cost_usd)",
+                      "expression": "SUM(`batch_cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Batch Inference Cost",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(batch_cost_usd)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "batch_dbus_counter",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "batch_total_cost",
+                  "fields": [
+                    {
+                      "name": "sum(total_dbus)",
+                      "expression": "SUM(`total_dbus`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Batch Inference DBUs",
+                "showTitle": true
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_dbus)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "rt_vs_batch_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "rt_vs_batch_cost",
+                  "fields": [
+                    {
+                      "name": "inference_type",
+                      "expression": "`inference_type`"
+                    },
+                    {
+                      "name": "sum(cost_usd)",
+                      "expression": "SUM(`cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Real-Time vs Batch Inference Cost",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "inference_type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "batch_daily_cost_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "batch_daily_cost",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "sum(batch_cost_usd)",
+                      "expression": "SUM(`batch_cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Daily Batch Inference Cost",
+                "showTitle": true
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(batch_cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "batch_by_endpoint_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "batch_by_endpoint",
+                  "fields": [
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    },
+                    {
+                      "name": "sum(batch_cost_usd)",
+                      "expression": "SUM(`batch_cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "title": "Batch Cost by Endpoint (Top 10)",
+                "showTitle": true
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "endpoint_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(batch_cost_usd)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "batch_by_job_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "batch_by_job",
+                  "fields": [
+                    {
+                      "name": "job_id",
+                      "expression": "`job_id`"
+                    },
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    },
+                    {
+                      "name": "sum(total_dbus)",
+                      "expression": "SUM(`total_dbus`)"
+                    },
+                    {
+                      "name": "sum(batch_cost_usd)",
+                      "expression": "SUM(`batch_cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Batch Inference by Job",
+                "showTitle": true
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "job_id"
+                  },
+                  {
+                    "fieldName": "endpoint_name"
+                  },
+                  {
+                    "fieldName": "sum(total_dbus)"
+                  },
+                  {
+                    "fieldName": "sum(batch_cost_usd)"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "batch_by_warehouse_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "batch_by_warehouse",
+                  "fields": [
+                    {
+                      "name": "warehouse_id",
+                      "expression": "`warehouse_id`"
+                    },
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    },
+                    {
+                      "name": "sum(total_dbus)",
+                      "expression": "SUM(`total_dbus`)"
+                    },
+                    {
+                      "name": "sum(batch_cost_usd)",
+                      "expression": "SUM(`batch_cost_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "title": "Batch Inference by Warehouse",
+                "showTitle": true
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "warehouse_id"
+                  },
+                  {
+                    "fieldName": "endpoint_name"
+                  },
+                  {
+                    "fieldName": "sum(total_dbus)"
+                  },
+                  {
+                    "fieldName": "sum(batch_cost_usd)"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
       "layoutVersion": "GRID_V1"
     }
   ],
