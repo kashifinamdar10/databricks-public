@@ -29,11 +29,21 @@ dbutils.widgets.dropdown(
     ["sporadic_triage", "all_exec_errors", "all_failures"],
     "Which failures to enrich",
 )
+# Leave blank for ALL workspaces; set a single workspace_id to scope everything below to it.
+dbutils.widgets.text("workspace_id", "", "Workspace ID (blank = all)")
 
 LOOKBACK_DAYS = int(dbutils.widgets.get("lookback_days"))
 ENRICH_LIMIT = int(dbutils.widgets.get("enrich_limit"))
 ENRICH_SCOPE = dbutils.widgets.get("enrich_scope")
-print(f"lookback_days={LOOKBACK_DAYS}  enrich_limit={ENRICH_LIMIT}  enrich_scope={ENRICH_SCOPE}")
+
+# workspace_id is a STRING in the system tables — quote it and filter as text.
+WS_FILTER = dbutils.widgets.get("workspace_id").strip()
+WS_CLAUSE = f"AND workspace_id = '{WS_FILTER}'" if WS_FILTER else ""
+# Reusable name lookup (system.access.workspaces_latest maps id -> name).
+WS_NAMES = "(SELECT workspace_id, workspace_name FROM system.access.workspaces_latest)"
+
+print(f"lookback_days={LOOKBACK_DAYS}  enrich_limit={ENRICH_LIMIT}  "
+      f"enrich_scope={ENRICH_SCOPE}  workspace_id={WS_FILTER or 'ALL'}")
 
 # COMMAND ----------
 
@@ -55,6 +65,7 @@ WITH terminal_runs AS (
   WHERE period_end_time >= dateadd(DAY, -{LOOKBACK_DAYS}, current_timestamp())
     AND run_type = 'JOB_RUN'
     AND result_state IS NOT NULL
+    {WS_CLAUSE}
   QUALIFY ROW_NUMBER() OVER (PARTITION BY workspace_id, run_id ORDER BY period_end_time DESC) = 1
 ),
 categorized AS (
@@ -105,12 +116,15 @@ categorized AS (
     END AS disposition
   FROM terminal_runs
 )
-SELECT workspace_id, run_date, failure_category, resolution_lever, disposition,
-       COUNT(*) AS runs, COUNT(DISTINCT run_id) AS distinct_runs
-FROM categorized
-WHERE failure_category NOT LIKE '0.%'
-GROUP BY workspace_id, run_date, failure_category, resolution_lever, disposition
-ORDER BY workspace_id, run_date, runs DESC
+SELECT c.workspace_id, w.workspace_name, c.run_date, c.failure_category,
+       c.resolution_lever, c.disposition,
+       COUNT(*) AS runs, COUNT(DISTINCT c.run_id) AS distinct_runs
+FROM categorized c
+LEFT JOIN {WS_NAMES} w ON c.workspace_id = w.workspace_id
+WHERE c.failure_category NOT LIKE '0.%'
+GROUP BY c.workspace_id, w.workspace_name, c.run_date, c.failure_category,
+         c.resolution_lever, c.disposition
+ORDER BY c.workspace_id, c.run_date, runs DESC
 """)
 display(daily_matrix)
 
@@ -128,10 +142,12 @@ WITH terminal_runs AS (
   WHERE period_end_time >= dateadd(DAY, -{LOOKBACK_DAYS}, current_timestamp())
     AND run_type = 'JOB_RUN'
     AND result_state IS NOT NULL
+    {WS_CLAUSE}
   QUALIFY ROW_NUMBER() OVER (PARTITION BY workspace_id, run_id ORDER BY period_end_time DESC) = 1
 ),
 failures AS (
   SELECT
+    workspace_id,
     CASE WHEN termination_code = 'RUN_EXECUTION_ERROR' THEN 'Agent candidate (long tail)'
          ELSE 'Solved by best practices' END AS disposition,
     CASE
@@ -147,11 +163,14 @@ failures AS (
   FROM terminal_runs
   WHERE result_state IN ('FAILED','ERROR','SKIPPED','TIMEDOUT')
 )
-SELECT failure_category, disposition, COUNT(*) AS failed_runs,
-       ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct_of_failures
-FROM failures
-GROUP BY failure_category, disposition
-ORDER BY failed_runs DESC
+SELECT f.workspace_id, w.workspace_name, f.failure_category, f.disposition,
+       COUNT(*) AS failed_runs,
+       -- % within each workspace (partitioned), so per-workspace views still sum to 100
+       ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY f.workspace_id), 1) AS pct_of_ws_failures
+FROM failures f
+LEFT JOIN {WS_NAMES} w ON f.workspace_id = w.workspace_id
+GROUP BY f.workspace_id, w.workspace_name, f.failure_category, f.disposition
+ORDER BY f.workspace_id, failed_runs DESC
 """)
 display(exec_rollup)
 
@@ -172,6 +191,7 @@ WITH exec_errors AS (
   WHERE period_end_time >= dateadd(DAY, -{LOOKBACK_DAYS}, current_timestamp())
     AND run_type = 'JOB_RUN' AND result_state IS NOT NULL
     AND termination_code = 'RUN_EXECUTION_ERROR'
+    {WS_CLAUSE}
   QUALIFY ROW_NUMBER() OVER (PARTITION BY workspace_id, run_id ORDER BY period_end_time DESC) = 1
 ),
 per_job AS (SELECT workspace_id, job_id, COUNT(*) AS fails FROM exec_errors GROUP BY workspace_id, job_id)
@@ -195,10 +215,11 @@ WITH exec_errors AS (
   WHERE period_end_time >= dateadd(DAY, -{LOOKBACK_DAYS}, current_timestamp())
     AND run_type = 'JOB_RUN' AND result_state IS NOT NULL
     AND termination_code = 'RUN_EXECUTION_ERROR'
+    {WS_CLAUSE}
   QUALIFY ROW_NUMBER() OVER (PARTITION BY workspace_id, run_id ORDER BY period_end_time DESC) = 1
 ),
 per_job AS (SELECT workspace_id, job_id, COUNT(*) AS failed_runs FROM exec_errors GROUP BY workspace_id, job_id)
-SELECT e.workspace_id, e.job_id, j.name AS job_name, e.failed_runs,
+SELECT e.workspace_id, w.workspace_name, e.job_id, j.name AS job_name, e.failed_runs,
        ROUND(100.0 * e.failed_runs / SUM(e.failed_runs) OVER (), 1) AS pct_of_exec_errors,
        ROUND(100.0 * SUM(e.failed_runs) OVER (ORDER BY e.failed_runs DESC, e.job_id
              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
@@ -208,6 +229,7 @@ LEFT JOIN (
   SELECT workspace_id, job_id, name FROM system.lakeflow.jobs
   QUALIFY ROW_NUMBER() OVER (PARTITION BY workspace_id, job_id ORDER BY change_time DESC) = 1
 ) j ON e.workspace_id = j.workspace_id AND e.job_id = j.job_id
+LEFT JOIN {WS_NAMES} w ON e.workspace_id = w.workspace_id
 ORDER BY e.failed_runs DESC, e.job_id
 LIMIT 25
 """)
@@ -235,6 +257,21 @@ from pyspark.sql import Row
 w = WorkspaceClient()
 CURRENT_WS_ID = int(w.get_workspace_id())
 print(f"Current workspace_id = {CURRENT_WS_ID}")
+
+# The Jobs API only sees jobs in the workspace this notebook runs in, so enrichment is always
+# scoped to CURRENT_WS_ID. If the user filtered to a *different* workspace, the taxonomy queries
+# above reflect that workspace but the enrichment below cannot reach its runs — warn and skip.
+if WS_FILTER and WS_FILTER != str(CURRENT_WS_ID):
+    print(f"NOTE: workspace_id filter '{WS_FILTER}' != current workspace {CURRENT_WS_ID}. "
+          f"Jobs API enrichment can only reach the current workspace, so no runs will be enriched. "
+          f"Run this notebook inside workspace {WS_FILTER} to enrich its failures.")
+
+# Resolve the current workspace name once, to stamp onto every enriched row.
+_wsn = spark.sql(
+    f"SELECT workspace_name FROM system.access.workspaces_latest "
+    f"WHERE workspace_id = '{CURRENT_WS_ID}' LIMIT 1"
+).collect()
+CURRENT_WS_NAME = _wsn[0]["workspace_name"] if _wsn else None
 
 # Pick the set of failed runs to enrich, per the enrich_scope widget.
 scope_filter = {
@@ -275,7 +312,8 @@ def enrich_run(run_meta):
     try:
         run = w.jobs.get_run(run_id=int(run_meta["run_id"]))
     except Exception as e:  # run may be aged out of Jobs API history, or not in this workspace
-        return [Row(run_id=int(run_meta["run_id"]), job_id=int(run_meta["job_id"]),
+        return [Row(workspace_id=CURRENT_WS_ID, workspace_name=CURRENT_WS_NAME,
+                    run_id=int(run_meta["run_id"]), job_id=int(run_meta["job_id"]),
                     run_date=str(run_meta["run_date"]), termination_code=run_meta["termination_code"],
                     task_key=None, task_run_id=None,
                     state_message=f"[Jobs API unavailable: {type(e).__name__}: {e}]",
@@ -303,6 +341,7 @@ def enrich_run(run_meta):
         except Exception as e:
             error = f"[get-output unavailable: {type(e).__name__}: {e}]"
         rows.append(Row(
+            workspace_id=CURRENT_WS_ID, workspace_name=CURRENT_WS_NAME,
             run_id=int(run_meta["run_id"]), job_id=int(run_meta["job_id"]),
             run_date=str(run_meta["run_date"]), termination_code=run_meta["termination_code"],
             task_key=task_key, task_run_id=task_run_id,
