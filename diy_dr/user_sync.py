@@ -85,7 +85,40 @@ class add_users:
 
         return headers
 
- 
+
+
+    def _safe_json(self, response):
+        # SCIM responses are not always JSON (empty body, gateway HTML on 5xx,
+        # 429 throttle). Return {} instead of raising so one bad response never
+        # kills the whole sync; keep the raw text available for logging.
+        body = (response.text or "").strip()
+        if not body:
+            return {}
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError:
+            print(f"non-JSON response status={response.status_code} body={response.text!r}")
+            return {"_raw": response.text}
+
+    def _scim_list_all(self, host, token, resource):
+        # Page through a SCIM list endpoint (Users / ServicePrincipals / Groups)
+        # so we return ALL resources, not just the first 100 (the SCIM default).
+        headers = self.get_header(token)
+        url = f"{host}/api/2.0/preview/scim/v2/{resource}"
+        results = []
+        start_index = 1
+        page_size = 100
+        while True:
+            response = requests.get(url, headers=headers,
+                                    params={"startIndex": start_index, "count": page_size})
+            data = self._safe_json(response)
+            page = data.get('Resources', [])
+            results.extend(page)
+            total = int(data.get('totalResults', 0))
+            start_index += page_size
+            if not page or start_index > total:
+                break
+        return results
 
     ##############add SPN function
 
@@ -103,15 +136,7 @@ class add_users:
 
         dr_token = self.dr_token
 
-        url = f"{primary_host}/api/2.0/preview/scim/v2/ServicePrincipals"
-
-        primary_headers = self.get_header(self.primary_token)
-
-        response = requests.get(url, headers = primary_headers)
-
-        data = json.loads(response.text)
-
-        data = data['Resources']
+        data = self._scim_list_all(primary_host, primary_token, "ServicePrincipals")
 
         for a in data:
 
@@ -171,15 +196,7 @@ class add_users:
 
         if self.add_type == 'users':
 
-            primary_url = f"{self.primary_host}/api/2.0/preview/scim/v2/Users"
-
-            headers = self.get_header(self.primary_token)
-
-            response = requests.get(primary_url, headers = headers)
-
-            data = json.loads(response.text)
-
-            for u in data['Resources']:
+            for u in self._scim_list_all(self.primary_host, self.primary_token, "Users"):
 
                 user_email = u['emails']
 
@@ -251,7 +268,20 @@ class add_users:
 
             response = requests.post(endpoint, headers=headers, json=user_data)
 
-            data = json.loads(response.text)
+            # Log status + raw body so a rejected create is diagnosable instead
+            # of crashing the whole run. SCIM does not always return JSON (empty
+            # body, gateway HTML on 5xx, 429 throttle), which makes json.loads
+            # raise "Expecting value: line 1 column 1 (char 0)".
+
+            print(f"create_user {user_data.get('userName')} -> status={response.status_code} body={response.text!r}")
+
+            try:
+
+                data = response.json()
+
+            except ValueError:
+
+                data = {"_raw": response.text}
 
             return response.status_code, data
 
@@ -261,21 +291,45 @@ class add_users:
 
  
 
-        #####################get the list of users in DR in list
+        #####################get the list of users in DR in list (paginated)
 
         api_url = f"{endpoint}/api/2.0/preview/scim/v2/Users"
 
-        response = requests.get(api_url, headers = headers)
+        start_index = 1
 
-        data = json.loads(response.text)
+        page_size = 100
 
+        while True:
 
+            paged_url = f"{api_url}?startIndex={start_index}&count={page_size}"
 
-        for a in data.get('Resources', []):
+            response = requests.get(paged_url, headers = headers)
 
-            email = a['userName']
+            try:
 
-            dr_users.append(email)
+                data = response.json()
+
+            except ValueError:
+
+                print(f"list DR users -> status={response.status_code} body={response.text!r}")
+
+                break
+
+            resources = data.get('Resources', [])
+
+            for a in resources:
+
+                if 'userName' in a:
+
+                    dr_users.append(a['userName'])
+
+            total = int(data.get('totalResults', 0))
+
+            start_index += page_size
+
+            if not resources or start_index > total:
+
+                break
 
  
 
@@ -336,33 +390,27 @@ class add_users:
         primary_token = self.primary_token
         dr_host = self.dr_host
         dr_token = self.dr_token
-        primary_headers = self.get_header(primary_token)
         dr_headers = self.get_header(dr_token)
 
         # primary id -> natural key (userName / applicationId / displayName)
-        primary_user_url = f"{primary_host}/api/2.0/preview/scim/v2/Users"
-        primary_users = json.loads(requests.get(primary_user_url, headers=primary_headers).text).get('Resources', [])
+        primary_users = self._scim_list_all(primary_host, primary_token, "Users")
         primary_user_id_to_name = {u['id']: u['userName'] for u in primary_users if 'id' in u and 'userName' in u}
 
-        primary_spn_url = f"{primary_host}/api/2.0/preview/scim/v2/ServicePrincipals"
-        primary_spns = json.loads(requests.get(primary_spn_url, headers=primary_headers).text).get('Resources', [])
+        primary_spns = self._scim_list_all(primary_host, primary_token, "ServicePrincipals")
         primary_spn_id_to_app = {sp['id']: sp['applicationId'] for sp in primary_spns if 'id' in sp and 'applicationId' in sp}
 
-        primary_group_url = f"{primary_host}/api/2.0/preview/scim/v2/Groups"
-        primary_groups = json.loads(requests.get(primary_group_url, headers=primary_headers).text).get('Resources', [])
+        primary_groups = self._scim_list_all(primary_host, primary_token, "Groups")
         primary_group_id_to_name = {g['id']: g['displayName'] for g in primary_groups if 'id' in g and 'displayName' in g}
 
         # DR natural key -> DR id (so primary member ids can be translated)
-        dr_user_url = f"{dr_host}/api/2.0/preview/scim/v2/Users"
-        dr_users = json.loads(requests.get(dr_user_url, headers=dr_headers).text).get('Resources', [])
+        dr_group_url = f"{dr_host}/api/2.0/preview/scim/v2/Groups"
+        dr_users = self._scim_list_all(dr_host, dr_token, "Users")
         dr_name_to_user_id = {u['userName']: u['id'] for u in dr_users if 'id' in u and 'userName' in u}
 
-        dr_spn_url = f"{dr_host}/api/2.0/preview/scim/v2/ServicePrincipals"
-        dr_spns = json.loads(requests.get(dr_spn_url, headers=dr_headers).text).get('Resources', [])
+        dr_spns = self._scim_list_all(dr_host, dr_token, "ServicePrincipals")
         dr_app_to_spn_id = {sp['applicationId']: sp['id'] for sp in dr_spns if 'id' in sp and 'applicationId' in sp}
 
-        dr_group_url = f"{dr_host}/api/2.0/preview/scim/v2/Groups"
-        dr_groups = json.loads(requests.get(dr_group_url, headers=dr_headers).text).get('Resources', [])
+        dr_groups = self._scim_list_all(dr_host, dr_token, "Groups")
         dr_name_to_group_id = {g['displayName']: g['id'] for g in dr_groups if 'id' in g and 'displayName' in g}
 
         # pass 1: create groups (without members) for displayNames missing in DR.
@@ -379,7 +427,7 @@ class add_users:
                 response = requests.post(dr_group_url, headers=dr_headers, data=json.dumps(payload))
                 statuses.append(response.status_code)
                 if response.status_code == 201:
-                    created = json.loads(response.text)
+                    created = self._safe_json(response)
                     dr_name_to_group_id[display_name] = created.get('id')
                     print(f"{display_name} group created successfully")
                 else:
