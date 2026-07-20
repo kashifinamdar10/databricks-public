@@ -1,0 +1,1409 @@
+{
+  "datasets": [
+    {
+      "name": "ds_spaces",
+      "displayName": "Spaces",
+      "queryLines": [
+        "SELECT genie_space_id, SUM(genie_q) AS queries FROM main.mki_genie_cost.space_user_hourly GROUP BY 1 ORDER BY queries DESC "
+      ]
+    },
+    {
+      "name": "ds_summary",
+      "displayName": "Summary",
+      "queryLines": [
+        "WITH gh AS (   SELECT warehouse_id, hour_ts, SUM(genie_ms) AS genie_ms, SUM(genie_q) AS genie_q   FROM main.mki_genie_cost.space_user_hourly   WHERE genie_space_id = :genie_space AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max   GROUP BY 1,2 ), gw AS (SELECT DISTINCT warehouse_id FROM gh), wh AS (   SELECT warehouse_id, hour_ts, total_ms, dbus FROM main.mki_genie_cost.wh_hourly   WHERE warehouse_id IN (SELECT warehouse_id FROM gw)     AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max ), p AS (SELECT cast(:dbu_price AS DOUBLE) AS price)  , alloc AS (   SELECT SUM(wh.dbus*gh.genie_ms/wh.total_ms) AS genie_dbus, SUM(gh.genie_ms) AS genie_ms, SUM(gh.genie_q) AS genie_q   FROM gh JOIN wh USING(warehouse_id,hour_ts) WHERE wh.total_ms>0 ), whtot AS (   SELECT COUNT(DISTINCT hour_ts) running_hours, SUM(dbus) dbus, AVG(dbus) avg_dbu, MIN(dbus) min_dbu,          percentile(dbus,0.5) med_dbu, percentile(dbus,0.9) p90_dbu, MAX(dbus) max_dbu, SUM(total_ms) all_ms   FROM wh ), nu AS (SELECT COUNT(DISTINCT user_email) n_users FROM main.mki_genie_cost.space_user_hourly        WHERE genie_space_id=:genie_space AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max), cfg AS (SELECT * FROM main.mki_genie_cost.wh_config WHERE warehouse_id IN (SELECT warehouse_id FROM gw)) SELECT   MAX(cfg.warehouse_name) warehouse_name, MAX(cfg.warehouse_size) warehouse_size,   MAX(cfg.min_clusters) min_clusters, MAX(cfg.max_clusters) max_clusters, MAX(cfg.auto_stop_minutes) auto_stop_minutes,   ROUND(MAX(whtot.dbus)*MAX(p.price),2) wh_cost_usd, ROUND(MAX(whtot.running_hours),0) running_hours,   ROUND(MAX(whtot.avg_dbu)*MAX(p.price),2) avg_cost_hr, ROUND(MAX(whtot.min_dbu)*MAX(p.price),2) min_cost_hr,   ROUND(MAX(whtot.med_dbu)*MAX(p.price),2) median_cost_hr, ROUND(MAX(whtot.p90_dbu)*MAX(p.price),2) p90_cost_hr,   ROUND(MAX(whtot.max_dbu)*MAX(p.price),2) max_cost_hr,   ROUND(MAX(alloc.genie_dbus)*MAX(p.price),2) genie_cost_usd, ROUND(MAX(alloc.genie_dbus),2) genie_dbus,   MAX(nu.n_users) n_users, MAX(alloc.genie_q) genie_queries,   ROUND(100.0*MAX(alloc.genie_dbus)/NULLIF(MAX(whtot.dbus),0),3) genie_pct_of_cost,   ROUND(100.0*MAX(alloc.genie_ms)/NULLIF(MAX(whtot.all_ms),0),3) genie_pct_of_activetime FROM alloc CROSS JOIN whtot CROSS JOIN nu CROSS JOIN p LEFT JOIN cfg ON 1=1 "
+      ],
+      "parameters": [
+        {
+          "displayName": "Genie space",
+          "keyword": "genie_space",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "01f164d0ba841bbbaf8b9c3ef43503cf"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "DBU price ($/DBU)",
+          "keyword": "dbu_price",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "0.393"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Date range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_split",
+      "displayName": "Genie vs Rest",
+      "queryLines": [
+        "WITH gh AS (   SELECT warehouse_id, hour_ts, SUM(genie_ms) AS genie_ms, SUM(genie_q) AS genie_q   FROM main.mki_genie_cost.space_user_hourly   WHERE genie_space_id = :genie_space AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max   GROUP BY 1,2 ), gw AS (SELECT DISTINCT warehouse_id FROM gh), wh AS (   SELECT warehouse_id, hour_ts, total_ms, dbus FROM main.mki_genie_cost.wh_hourly   WHERE warehouse_id IN (SELECT warehouse_id FROM gw)     AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max ), p AS (SELECT cast(:dbu_price AS DOUBLE) AS price)  , alloc AS (SELECT SUM(wh.dbus*gh.genie_ms/wh.total_ms) genie_dbus, SUM(gh.genie_ms) genie_ms             FROM gh JOIN wh USING(warehouse_id,hour_ts) WHERE wh.total_ms>0), whtot AS (SELECT SUM(dbus) dbus, SUM(total_ms) all_ms FROM wh) SELECT 'Genie space' segment, ROUND(alloc.genie_ms/1000.0,1) active_sec, ROUND(alloc.genie_dbus*p.price,2) est_cost_usd FROM alloc CROSS JOIN whtot CROSS JOIN p UNION ALL SELECT 'Other queries (shared)', ROUND((whtot.all_ms-alloc.genie_ms)/1000.0,1), ROUND((whtot.dbus-alloc.genie_dbus)*p.price,2) FROM alloc CROSS JOIN whtot CROSS JOIN p "
+      ],
+      "parameters": [
+        {
+          "displayName": "Genie space",
+          "keyword": "genie_space",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "01f164d0ba841bbbaf8b9c3ef43503cf"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "DBU price ($/DBU)",
+          "keyword": "dbu_price",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "0.393"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Date range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_daily",
+      "displayName": "Daily",
+      "queryLines": [
+        "WITH gh AS (   SELECT warehouse_id, hour_ts, SUM(genie_ms) AS genie_ms, SUM(genie_q) AS genie_q   FROM main.mki_genie_cost.space_user_hourly   WHERE genie_space_id = :genie_space AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max   GROUP BY 1,2 ), gw AS (SELECT DISTINCT warehouse_id FROM gh), wh AS (   SELECT warehouse_id, hour_ts, total_ms, dbus FROM main.mki_genie_cost.wh_hourly   WHERE warehouse_id IN (SELECT warehouse_id FROM gw)     AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max ), p AS (SELECT cast(:dbu_price AS DOUBLE) AS price)  , whd AS (SELECT to_date(hour_ts) d, SUM(dbus) dbus FROM wh GROUP BY 1), gd AS (SELECT to_date(gh.hour_ts) d, SUM(wh.dbus*gh.genie_ms/wh.total_ms) genie_dbus, SUM(gh.genie_q) q        FROM gh JOIN wh USING(warehouse_id,hour_ts) WHERE wh.total_ms>0 GROUP BY 1) SELECT whd.d usage_date, ROUND(whd.dbus*p.price,2) warehouse_cost_usd,        ROUND(COALESCE(gd.genie_dbus,0)*p.price,4) genie_cost_usd, COALESCE(gd.q,0) genie_queries FROM whd LEFT JOIN gd USING(d) CROSS JOIN p ORDER BY usage_date "
+      ],
+      "parameters": [
+        {
+          "displayName": "Genie space",
+          "keyword": "genie_space",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "01f164d0ba841bbbaf8b9c3ef43503cf"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "DBU price ($/DBU)",
+          "keyword": "dbu_price",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "0.393"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Date range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_users",
+      "displayName": "Per user",
+      "queryLines": [
+        "WITH gh AS (   SELECT warehouse_id, hour_ts, SUM(genie_ms) AS genie_ms, SUM(genie_q) AS genie_q   FROM main.mki_genie_cost.space_user_hourly   WHERE genie_space_id = :genie_space AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max   GROUP BY 1,2 ), gw AS (SELECT DISTINCT warehouse_id FROM gh), wh AS (   SELECT warehouse_id, hour_ts, total_ms, dbus FROM main.mki_genie_cost.wh_hourly   WHERE warehouse_id IN (SELECT warehouse_id FROM gw)     AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max ), p AS (SELECT cast(:dbu_price AS DOUBLE) AS price)  , uh AS (   SELECT warehouse_id, hour_ts, user_email, SUM(genie_ms) u_ms, SUM(genie_q) q   FROM main.mki_genie_cost.space_user_hourly   WHERE genie_space_id=:genie_space AND to_date(hour_ts) BETWEEN :date_range.min AND :date_range.max   GROUP BY 1,2,3 ), whtot AS (SELECT SUM(dbus) dbus FROM wh) SELECT COALESCE(uh.user_email,'(unknown)') user_email, SUM(uh.q) genie_queries,        ROUND(SUM(uh.u_ms)/1000.0,1) active_sec,        ROUND(SUM(wh.dbus*uh.u_ms/wh.total_ms)*MAX(p.price),4) est_cost_usd,        ROUND(100.0*SUM(wh.dbus*uh.u_ms/wh.total_ms)/NULLIF(MAX(whtot.dbus),0),4) pct_of_wh_cost FROM uh JOIN wh USING(warehouse_id,hour_ts) CROSS JOIN p CROSS JOIN whtot WHERE wh.total_ms>0 GROUP BY 1 ORDER BY est_cost_usd DESC "
+      ],
+      "parameters": [
+        {
+          "displayName": "Genie space",
+          "keyword": "genie_space",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "01f164d0ba841bbbaf8b9c3ef43503cf"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "DBU price ($/DBU)",
+          "keyword": "dbu_price",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "0.393"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Date range",
+          "keyword": "date_range",
+          "dataType": "DATE",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATE",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "displayName": "Genie Cost",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Genie Cost on Shared SQL Warehouse"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Estimated cost of a Genie space's queries on a shared warehouse, and **why** the share is the size it is. Duration-proportional allocation of billed DBUs; **priced at NFCU's net rate ($0.393/DBU)** — change `dbu_price` to 0.70 for list. Use the **Filters** page to pick a Genie space and date range."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_genie_cost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "genie_cost_usd",
+                      "expression": "`genie_cost_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "genie_cost_usd",
+                  "displayName": "Est. Genie cost ($)"
+                }
+              },
+              "frame": {
+                "title": "Est. Genie cost ($)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_genie_pct",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "genie_pct_of_cost",
+                      "expression": "`genie_pct_of_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "genie_pct_of_cost",
+                  "displayName": "Genie % of warehouse bill"
+                }
+              },
+              "frame": {
+                "title": "Genie % of warehouse bill",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_wh_cost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "wh_cost_usd",
+                      "expression": "`wh_cost_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "wh_cost_usd",
+                  "displayName": "Total warehouse cost ($)"
+                }
+              },
+              "frame": {
+                "title": "Total warehouse cost ($)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_users",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "n_users",
+                      "expression": "`n_users`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "n_users",
+                  "displayName": "Genie users"
+                }
+              },
+              "frame": {
+                "title": "Genie users",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "h_why",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Why is the share this size? — Genie vs. everything else on the warehouse"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "split_time",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_split",
+                  "fields": [
+                    {
+                      "name": "segment",
+                      "expression": "`segment`"
+                    },
+                    {
+                      "name": "active_sec",
+                      "expression": "`active_sec`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "segment",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": ""
+                },
+                "y": {
+                  "fieldName": "active_sec",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Active query-seconds"
+                }
+              },
+              "frame": {
+                "title": "Share of ACTIVE query-time",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "split_cost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_split",
+                  "fields": [
+                    {
+                      "name": "segment",
+                      "expression": "`segment`"
+                    },
+                    {
+                      "name": "est_cost_usd",
+                      "expression": "`est_cost_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "segment",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": ""
+                },
+                "y": {
+                  "fieldName": "est_cost_usd",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Estimated $"
+                }
+              },
+              "frame": {
+                "title": "Share of COST",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 6,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "why_note",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Genie's slice of **cost** ≈ its slice of **active query-time** — that is exactly how allocation works. A tiny time-share on a busy shared warehouse ⇒ a tiny cost-share. If Genie were the only/dominant user, its share (and the idle keep-alive time it causes) would approach 100%."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "h_cfg",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Warehouse configuration & hourly rate (drivers of the bill)"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "cfg_size",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "warehouse_size",
+                      "expression": "`warehouse_size`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "warehouse_size",
+                  "displayName": "Warehouse size"
+                }
+              },
+              "frame": {
+                "title": "Warehouse size",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cfg_maxc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "max_clusters",
+                      "expression": "`max_clusters`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max_clusters",
+                  "displayName": "Max clusters (autoscale)"
+                }
+              },
+              "frame": {
+                "title": "Max clusters (autoscale)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 13,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cfg_stop",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "auto_stop_minutes",
+                      "expression": "`auto_stop_minutes`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "auto_stop_minutes",
+                  "displayName": "Auto-stop (min)"
+                }
+              },
+              "frame": {
+                "title": "Auto-stop (min)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 13,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cfg_hours",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "running_hours",
+                      "expression": "`running_hours`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "running_hours",
+                  "displayName": "Billed running hours"
+                }
+              },
+              "frame": {
+                "title": "Billed running hours",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 13,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "rate_min",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "min_cost_hr",
+                      "expression": "`min_cost_hr`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "min_cost_hr",
+                  "displayName": "Min $/hr (1 cluster)"
+                }
+              },
+              "frame": {
+                "title": "Min $/hr (1 cluster)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "rate_med",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "median_cost_hr",
+                      "expression": "`median_cost_hr`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "median_cost_hr",
+                  "displayName": "Median $/hr"
+                }
+              },
+              "frame": {
+                "title": "Median $/hr",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 16,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "rate_avg",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "avg_cost_hr",
+                      "expression": "`avg_cost_hr`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg_cost_hr",
+                  "displayName": "Avg $/hr"
+                }
+              },
+              "frame": {
+                "title": "Avg $/hr",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 16,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "rate_max",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "fields": [
+                    {
+                      "name": "max_cost_hr",
+                      "expression": "`max_cost_hr`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max_cost_hr",
+                  "displayName": "Max $/hr (scaled out)"
+                }
+              },
+              "frame": {
+                "title": "Max $/hr (scaled out)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 16,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "h_trend",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Cost over time (daily)"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "trend_wh",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "warehouse_cost_usd",
+                      "expression": "`warehouse_cost_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Date"
+                },
+                "y": {
+                  "fieldName": "warehouse_cost_usd",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Warehouse $"
+                }
+              },
+              "frame": {
+                "title": "Total warehouse cost / day",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "trend_genie",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "fields": [
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "genie_cost_usd",
+                      "expression": "`genie_cost_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Date"
+                },
+                "y": {
+                  "fieldName": "genie_cost_usd",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Genie $"
+                }
+              },
+              "frame": {
+                "title": "Estimated Genie cost / day",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 20,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "h_who",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Who is using Genie"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 25,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "users_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_users",
+                  "fields": [
+                    {
+                      "name": "user_email",
+                      "expression": "`user_email`"
+                    },
+                    {
+                      "name": "est_cost_usd",
+                      "expression": "`est_cost_usd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "user_email",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "User"
+                },
+                "y": {
+                  "fieldName": "est_cost_usd",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Est. $"
+                }
+              },
+              "frame": {
+                "title": "Estimated Genie cost by user",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 26,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "users_tbl",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_users",
+                  "fields": [
+                    {
+                      "name": "user_email",
+                      "expression": "`user_email`"
+                    },
+                    {
+                      "name": "genie_queries",
+                      "expression": "`genie_queries`"
+                    },
+                    {
+                      "name": "active_sec",
+                      "expression": "`active_sec`"
+                    },
+                    {
+                      "name": "est_cost_usd",
+                      "expression": "`est_cost_usd`"
+                    },
+                    {
+                      "name": "pct_of_wh_cost",
+                      "expression": "`pct_of_wh_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "user_email",
+                    "displayName": "User"
+                  },
+                  {
+                    "fieldName": "genie_queries",
+                    "displayName": "Queries"
+                  },
+                  {
+                    "fieldName": "active_sec",
+                    "displayName": "Active sec"
+                  },
+                  {
+                    "fieldName": "est_cost_usd",
+                    "displayName": "Est. cost $"
+                  },
+                  {
+                    "fieldName": "pct_of_wh_cost",
+                    "displayName": "% of warehouse bill"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Per-user detail",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 26,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "method",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## How the share is calculated (method & caveats)**Duration-proportional allocation.** A SQL warehouse bills DBUs for *uptime*, not per query. For each warehouse-hour we split billed DBUs across every query by its share of active time: `genie_cost = hourly_DBUs × (genie_active_ms ÷ all_active_ms) × dbu_price`. Idle / keep-alive time is spread proportionally across active work.**Pricing:** DBUs are stored in the rollup; the `dbu_price` parameter converts to $ (NFCU net = $0.393/DBU ≈ 43.9% off the $0.70 list). **Why config matters:** `auto_stop` sets how long idle is billed after the last query; `min/max clusters` drive the Min→Max $/hr spread; a bigger size costs more per hour.*Estimate, not a bill. Reads a materialized hourly rollup (`main.mki_genie_cost.*`) refreshed from system tables. For exact numbers, run the space on a dedicated tagged serverless warehouse.*"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 31,
+            "width": 12,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "filters",
+      "displayName": "Filters",
+      "layout": [
+        {
+          "widget": {
+            "name": "filter_space",
+            "queries": [
+              {
+                "name": "q_choices",
+                "query": {
+                  "datasetName": "ds_spaces",
+                  "fields": [
+                    {
+                      "name": "genie_space_id",
+                      "expression": "`genie_space_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_sum",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "parameters": [
+                    {
+                      "name": "genie_space",
+                      "keyword": "genie_space"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_split",
+                "query": {
+                  "datasetName": "ds_split",
+                  "parameters": [
+                    {
+                      "name": "genie_space",
+                      "keyword": "genie_space"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_daily",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "parameters": [
+                    {
+                      "name": "genie_space",
+                      "keyword": "genie_space"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_users",
+                "query": {
+                  "datasetName": "ds_users",
+                  "parameters": [
+                    {
+                      "name": "genie_space",
+                      "keyword": "genie_space"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "genie_space_id",
+                    "displayName": "Genie space",
+                    "queryName": "q_choices"
+                  },
+                  {
+                    "parameterName": "genie_space",
+                    "queryName": "q_sum"
+                  },
+                  {
+                    "parameterName": "genie_space",
+                    "queryName": "q_split"
+                  },
+                  {
+                    "parameterName": "genie_space",
+                    "queryName": "q_daily"
+                  },
+                  {
+                    "parameterName": "genie_space",
+                    "queryName": "q_users"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Genie space"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_date",
+            "queries": [
+              {
+                "name": "d_sum",
+                "query": {
+                  "datasetName": "ds_summary",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "d_split",
+                "query": {
+                  "datasetName": "ds_split",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "d_daily",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "d_users",
+                "query": {
+                  "datasetName": "ds_users",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "d_sum"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "d_split"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "d_daily"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "d_users"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Date range"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    }
+  ]
+}
