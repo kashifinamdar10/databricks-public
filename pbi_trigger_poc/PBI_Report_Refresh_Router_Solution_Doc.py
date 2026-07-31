@@ -394,6 +394,20 @@
 # MAGIC    - **Wait after last change**: `90` seconds
 # MAGIC 3. **Set Max Concurrent Runs**: `1` (prevents race conditions on state tables)
 # MAGIC
+# MAGIC #### Supported Table Types for Trigger Monitoring
+# MAGIC | Supported | Not Supported |
+# MAGIC |-----------|---------------|
+# MAGIC | UC Delta managed tables | Hive metastore tables |
+# MAGIC | UC Iceberg managed tables | Views using `read_files` |
+# MAGIC | UC external tables (Delta-backed) | Views depending on non-UC tables |
+# MAGIC | Materialized views | Views depending on federated tables |
+# MAGIC | Streaming tables | |
+# MAGIC | UC views / metric views (deps must be supported types) | |
+# MAGIC | OpenSharing tables & views (Beta) | |
+# MAGIC | System tables (Beta) | |
+# MAGIC
+# MAGIC > **Limit**: Max 10 tables per trigger. For UC views, the underlying source tables count toward this limit (e.g. a view over 6 tables uses 6 of the 10 slots).
+# MAGIC
 # MAGIC ### 5b. Define Job Parameters
 # MAGIC
 # MAGIC | Parameter Name | Default Value |
@@ -596,29 +610,7 @@
 # MAGIC
 # MAGIC This records the table update in `table_state` and evaluates all reports. If a report’s other dependencies haven’t arrived yet, it correctly remains "not due".
 # MAGIC
-# MAGIC ---
 # MAGIC
-# MAGIC ## Disabling a Report
-# MAGIC
-# MAGIC To temporarily stop refreshing a report without removing it:
-# MAGIC ```sql
-# MAGIC UPDATE <catalog>.<schema>.report_mapping 
-# MAGIC SET enabled = false 
-# MAGIC WHERE report_id = 'finance';
-# MAGIC ```
-# MAGIC
-# MAGIC The dispatcher will set `refresh_finance = "false"` regardless of table updates.
-# MAGIC
-# MAGIC ---
-# MAGIC
-# MAGIC ## Manual Testing
-# MAGIC
-# MAGIC You can manually trigger the job with a simulated payload:
-# MAGIC * In the Jobs UI: Run Now → override the `updated_tables` parameter with a JSON array:
-# MAGIC   ```json
-# MAGIC   ["my_catalog.my_schema.sales_orders"]
-# MAGIC   ```
-# MAGIC * This simulates a trigger where only `sales_orders` was updated, causing only `refresh_sales` to run.
 
 # COMMAND ----------
 
@@ -652,8 +644,9 @@
 # MAGIC * Easier to monitor and troubleshoot in the Jobs UI
 # MAGIC
 # MAGIC ### Concurrency
-# MAGIC * `max_concurrent_runs = 5` allows multiple trigger events to process simultaneously
-# MAGIC * The debounce settings (`min_time_between_triggers`, `wait_after_last_change`) prevent excessive triggering during bulk loads
+# MAGIC * `max_concurrent_runs = 1` ensures serial processing of state tables (no race conditions)
+# MAGIC * The debounce settings (`min_time_between_triggers`, `wait_after_last_change`) prevent queuing buildup during bulk loads
+# MAGIC * Jobs queue enabled: overlapping triggers wait in line rather than being dropped
 # MAGIC
 # MAGIC ### Error Handling & Automatic Retry
 # MAGIC * If a PBI refresh **fails**, the `commit_<id>` task is skipped → `report_state` stays unchanged
@@ -674,7 +667,7 @@
 # MAGIC ## Limitations & Considerations
 # MAGIC
 # MAGIC * **Power BI refresh limits**: Pro licenses allow 8 refreshes/day per dataset; Premium/Fabric allows 48+. The stateful pattern naturally reduces refresh frequency by waiting for all deps.
-# MAGIC * **Table-update triggers require Unity Catalog**: External tables, Hive metastore tables, and views are not supported as trigger sources.
+# MAGIC * **Table-update triggers require Unity Catalog**: Supported sources include UC Delta/Iceberg managed tables, UC external tables backed by Delta Lake, materialized views, streaming tables, and UC views/metric views (with limitations). **Not supported**: Hive metastore tables, views using `read_files`, views depending on non-UC or federated tables. Source tables underlying a view count toward the 10-table-per-trigger limit.
 # MAGIC * **Max concurrent runs = 1**: Required to avoid race conditions on state tables. If trigger events stack up, they queue (the debounce settings minimise queuing).
 # MAGIC * **Job DAG is static**: Adding a new report requires editing the job (adding gate + PBI + commit tasks). Use the **Job Generator notebook** (`job_generator.py`) to programmatically create/update jobs from the config tables at scale (supports 100s of reports).
 # MAGIC * **State table maintenance**: Over time, `table_state` accumulates rows for every monitored table. This is small and self-managing (MERGE upserts, no unbounded growth).
