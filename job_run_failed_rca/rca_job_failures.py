@@ -90,22 +90,25 @@ categorized AS (
       WHEN termination_code = 'RUN_EXECUTION_ERROR'                   THEN '5. Code / Data logic (needs triage)'
       ELSE                                                                 '6. Other / Uncategorized'
     END AS failure_category,
+    -- Lakeflow-forward levers: each failure TYPE maps to the Lakeflow Declarative
+    -- Pipelines (DLT) / Auto Loader capability that removes it, vs. today's hand-
+    -- orchestrated ADF + notebook pattern.
     CASE
       WHEN result_state = 'SUCCEEDED' OR termination_code = 'USER_CANCELLED' THEN 'n/a'
       WHEN termination_code IN ('INTERNAL_ERROR','CLOUD_FAILURE','CLUSTER_ERROR','DRIVER_ERROR')
-        THEN 'Job retries + serverless (auto-recover)'
+        THEN 'Lakeflow Declarative Pipelines on serverless — automatic retries + managed compute self-heal transient infra'
       WHEN termination_code IN ('INVALID_RUN_CONFIGURATION','INVALID_CLUSTER_REQUEST',
                                 'RESOURCE_NOT_FOUND','REPOSITORY_CHECKOUT_FAILED',
                                 'LIBRARY_INSTALLATION_ERROR','FEATURE_DISABLED')
-        THEN 'DABs + CI/CD + serverless (eliminate config drift)'
+        THEN 'Lakeflow Declarative Pipelines + DABs on serverless — no hand-built ADF/cluster config to drift'
       WHEN termination_code IN ('UNAUTHORIZED_ERROR','STORAGE_ACCESS_ERROR')
-        THEN 'Unity Catalog governance + service principals'
+        THEN 'Auto Loader on UC external locations + service principals — one governed ingestion path'
       WHEN termination_code IN ('MAX_CONCURRENT_RUNS_EXCEEDED','MAX_JOB_QUEUE_SIZE_EXCEEDED',
                                 'WORKSPACE_RUN_LIMIT_EXCEEDED','CLUSTER_REQUEST_LIMIT_EXCEEDED',
                                 'MAX_SPARK_CONTEXTS_EXCEEDED')
-        THEN 'Orchestration design + serverless elasticity'
+        THEN 'Lakeflow orchestration replaces ADF triggers — serverless elasticity absorbs concurrency spikes'
       WHEN termination_code = 'RUN_EXECUTION_ERROR'
-        THEN 'Lakeflow/DLT expectations + Auto Loader; triage agent for residual'
+        THEN 'Auto Loader (schema evolution) + DLT expectations (data-quality gates); RCA/triage agent for residual'
       ELSE 'Investigate'
     END AS resolution_lever,
     CASE
@@ -361,6 +364,99 @@ else:
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Query 5 (NEW) — Code-failure reasons + recommendations (ADF → Lakeflow story)
+# MAGIC The `RUN_EXECUTION_ERROR` long tail is where the *code* actually threw. Since the customer
+# MAGIC orchestrates from **ADF today** (copy activities + notebook runs, retries wired by hand), we
+# MAGIC mine the enriched error text into concrete failure reasons and map each to the Lakeflow
+# MAGIC Declarative Pipelines / Auto Loader capability that eliminates it. This is the "why code fails
+# MAGIC and what to do about it" worklist for the migration conversation.
+# MAGIC
+# MAGIC Note: classification runs over the *enriched sample* (`enrich_limit` runs). Raise `enrich_limit`
+# MAGIC for a fuller distribution.
+
+# COMMAND ----------
+
+code_reasons = None
+if enriched_rows:
+    enriched.createOrReplaceTempView("enriched_errors")
+    code_reasons = spark.sql("""
+      WITH classified AS (
+        SELECT run_id, job_id,
+               lower(coalesce(error, state_message, '')) AS msg
+        FROM enriched_errors
+        WHERE coalesce(error, state_message) IS NOT NULL
+          AND NOT startswith(coalesce(error, state_message), '[')  -- drop API-unavailable markers
+      ),
+      tagged AS (
+        SELECT *,
+          CASE
+            -- cascade: downstream task skipped because an upstream task failed — NOT a root cause
+            WHEN msg RLIKE 'was skipped because not all its dependencies|run result unavailable|all upstream tasks' THEN 'Cascading skip (upstream failed)'
+            -- nested Lakeflow/DLT pipeline failure — job-level error is just a pointer
+            WHEN msg RLIKE 'refer to the logs for this pipeline|pipeline.*page|dlt|delta live'                  THEN 'Lakeflow/DLT pipeline error (nested)'
+            -- kernel / driver crash (frequently memory-driven)
+            WHEN msg RLIKE 'kernel is unresponsive|python kernel|fatal error'                                   THEN 'Kernel / driver crash'
+            -- serverless incompatibility (RDDs, unsupported APIs)
+            WHEN msg RLIKE 'not allowed on serverless|pyspark rdds|not_implemented'                             THEN 'Serverless incompatibility'
+            -- schema / column / object resolution (Spark says "cannot BE resolved"; match error classes)
+            WHEN msg RLIKE 'unresolved_column|cannot be resolved|cannot resolve|analysisexception|table_or_view_not_found|no_such_catalog|no such catalog|catalog.*not.*found|no such struct|incompatible|schema mismatch|schema' THEN 'Schema / object mismatch'
+            WHEN msg RLIKE 'no such file|path does not exist|filenotfound|file.*not.*found|does not exist'      THEN 'Missing / late-arriving files'
+            WHEN msg RLIKE 'outofmemory|java heap|gc overhead|out of memory|executor lost|oom'                  THEN 'Memory pressure / OOM'
+            WHEN msg RLIKE 'timeout|timed out|deadline exceeded|exceeded .*time'                                THEN 'Timeout'
+            WHEN msg RLIKE 'permission|access denied|unauthorized|forbidden|403|operation not permitted'        THEN 'Data access / permissions'
+            -- monitoring / setup config (e.g. missing mlflow.monitoring warehouse tag)
+            WHEN msg RLIKE 'experiment tag|mlflow.monitoring|sqlwarehouseid|is missing or empty|not configured' THEN 'Monitoring / setup config'
+            -- missing job parameter / widget / lookup
+            WHEN msg RLIKE 'widget is required|widget .*required|no workflow found|parameter .*required|is required' THEN 'Missing parameter / widget'
+            WHEN msg RLIKE 'nullpointer|null value|nonetype|none type|null in'                                  THEN 'Null / type errors on dirty data'
+            WHEN msg RLIKE 'modulenotfound|importerror|no module named|cannot import|library install'           THEN 'Missing dependency / library'
+            WHEN msg RLIKE 'malformed|corrupt|badrecord|could not parse|parseexception'                         THEN 'Malformed / parse errors'
+            WHEN msg RLIKE 'constraint|duplicate|primary key|unique|merge .*match'                              THEN 'Data quality / dedup'
+            WHEN msg RLIKE 'connection|connect timed|refused|network|unknown host|jdbc|socket'                  THEN 'Source connectivity (JDBC/API)'
+            WHEN msg RLIKE 'instance pool|capacity|quota|limit exceeded'                                        THEN 'Capacity / quota'
+            -- generic unhandled application exception (real code bug)
+            WHEN msg RLIKE 'notimplementederror|not yet wired|typeerror|keyerror|valueerror|attributeerror|assertionerror|runtimeerror|exception' THEN 'Application code bug (unhandled exception)'
+            ELSE 'Other / uncategorized code error'
+          END AS code_failure_reason
+        FROM classified
+      )
+      SELECT
+        code_failure_reason,
+        COUNT(*)                       AS failed_runs,
+        COUNT(DISTINCT job_id)         AS distinct_jobs,
+        left(min(msg), 180)            AS sample_message,
+        CASE code_failure_reason
+          WHEN 'Cascading skip (upstream failed)' THEN 'Not a root cause — a downstream task skipped after an upstream failure. Dedupe to the upstream error; a Lakeflow DAG surfaces the true failing node and skips re-running healthy downstream work'
+          WHEN 'Lakeflow/DLT pipeline error (nested)' THEN 'Job error only points to the pipeline — drill into the pipeline event log (Pipelines API / system.lakeflow pipeline tables) for the real cause; add DLT expectations so data issues quarantine instead of failing the pipeline'
+          WHEN 'Kernel / driver crash'            THEN 'Usually driver memory or an unstable all-purpose cluster — move to serverless / right-size; split the monolithic notebook into smaller DLT stages'
+          WHEN 'Serverless incompatibility'       THEN 'Unsupported API on serverless (e.g. RDDs) — refactor to DataFrame/Spark SQL, or pin to classic compute via DABs until refactored'
+          WHEN 'Monitoring / setup config'        THEN 'Fix the setup config (e.g. set the Lakehouse Monitoring warehouse tag); manage it declaratively via DABs so it cannot drift'
+          WHEN 'Missing parameter / widget'       THEN 'Required job parameter/widget or lookup missing — make parameters explicit in the DABs job definition instead of relying on ADF-passed values'
+          WHEN 'Schema / object mismatch'         THEN 'Auto Loader schema inference + schemaEvolutionMode=addNewColumns; enforce with DLT expectations instead of failing the run; pin catalog/table refs in DABs'
+          WHEN 'Missing / late-arriving files'    THEN 'Auto Loader incremental file discovery — no ADF path enumeration; late/out-of-order files picked up automatically'
+          WHEN 'Application code bug (unhandled exception)' THEN 'Genuine code defect (unhandled exception) — this is the real RCA/triage-agent surface; route with the enriched stack trace for a fix suggestion'
+          WHEN 'Memory pressure / OOM'            THEN 'Move to serverless / let Lakeflow size compute; split monolithic notebook into DLT stages'
+          WHEN 'Timeout'                          THEN 'Serverless + Lakeflow Jobs automatic retries; decompose into incremental DLT tables so each run does less'
+          WHEN 'Data access / permissions'        THEN 'UC external locations + service principals; ingest via Auto Loader on the governed path'
+          WHEN 'Null / type errors on dirty data' THEN 'DLT expectations to quarantine/drop bad rows (EXPECT ... ON VIOLATION DROP) rather than crashing'
+          WHEN 'Missing dependency / library'     THEN 'Pin dependencies via DABs / serverless environments; remove ad-hoc %pip / cluster-library installs'
+          WHEN 'Malformed / parse errors'         THEN 'Auto Loader rescued-data column captures bad records; add DLT expectations on parse quality'
+          WHEN 'Data quality / dedup'             THEN 'DLT expectations + APPLY CHANGES INTO (CDC) for idempotent, dedup-safe upserts'
+          WHEN 'Source connectivity (JDBC/API)'   THEN 'Lakeflow Connect managed connectors with built-in retry, replacing ADF copy activities'
+          WHEN 'Capacity / quota'                 THEN 'Serverless removes fixed pools/quotas; Lakeflow elasticity absorbs bursts'
+          ELSE 'Route to the RCA/triage agent with the enriched error text + stack trace'
+        END AS recommendation
+      FROM tagged
+      GROUP BY code_failure_reason
+      ORDER BY failed_runs DESC
+    """)
+    display(code_reasons)
+else:
+    print("No enriched errors to classify — widen enrich_scope or lookback, or run inside the target workspace.")
+
+# COMMAND ----------
+
 # MAGIC %md ### Run summary (machine-readable exit value)
 
 # COMMAND ----------
@@ -393,6 +489,11 @@ summary = {
     "enriched_task_rows": len(enriched_rows),
     "rows_with_real_error_text": len(got_error_text),
     "sample_enriched_error": sample,
+    "code_failure_reason_breakdown": (
+        [{"reason": r["code_failure_reason"], "failed_runs": r["failed_runs"],
+          "recommendation": r["recommendation"]}
+         for r in code_reasons.collect()] if code_reasons is not None else []
+    ),
 }
 print(json.dumps(summary, indent=2, default=str))
 dbutils.notebook.exit(json.dumps(summary, default=str))
