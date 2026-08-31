@@ -110,7 +110,7 @@ ORDER BY workspace_id, run_date, runs DESC;
 -- ============================================================================
 -- QUERY 2 — Executive rollup: % of failures solved today vs. agent long-tail
 --   Drop the workspace_id GROUP BY for an account-wide view; keep it for the
---   per-workspace breakdown NFCU leadership asked for.
+--   per-workspace breakdown.
 -- ============================================================================
 WITH terminal_runs AS (
   SELECT workspace_id, run_id, result_state, termination_code,
