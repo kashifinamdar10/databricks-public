@@ -1,6 +1,3 @@
-Storage Metrics Analyzer (Enhanced)
-Copy everything below, save as a .py file, and import into Databricks as a notebook.
-
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Storage Metrics Analyzer (Enhanced)
